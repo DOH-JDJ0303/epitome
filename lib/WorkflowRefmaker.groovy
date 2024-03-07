@@ -15,8 +15,8 @@ class WorkflowRefmaker {
         genomeExistsError(params, log)
 
 
-        if (!params.fasta) {
-            Nextflow.error "Genome fasta file not specified with e.g. '--fasta genome.fa' or via a detectable config file."
+        if (!params.input) {
+            Nextflow.error "Supply input"
         }
     }
 
