@@ -1,22 +1,25 @@
 process MASH {
+    tag "${taxa}-${segment}"
     label 'process_medium'
     conda "bioconda::mash=2.3"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
         'https://depot.galaxyproject.org/singularity/mash:2.3--he348c14_1' :
-        'biocontainers/mash:2.3--he348c14_1' }"
+        'quay.io/biocontainers/mash:2.3--he348c14_1' }"
 
     input:
-    path sequences
+    tuple val(taxa), val(segment), path(sequences)
 
     output:
-    path("dist.txt")   , emit: dist
-    path "versions.yml", emit: versions
+    tuple val(taxa), val(segment), path("${prefix}-dist.txt"), emit: dist
+    path "versions.yml",                                       emit: versions
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
     def args = task.ext.args ?: ''
+    prefix = "${taxa}-${segment}"
+
     """
     # create mash sketch
     mash \\
@@ -24,8 +27,7 @@ process MASH {
         $args \\
         -p $task.cpus \\
         -o sketch \\
-        $sequences
-
+        -i ${sequences}
 
     # calculate distance
     mash \\
@@ -34,20 +36,7 @@ process MASH {
         -p $task.cpus \\
         sketch.msh \\
         sketch.msh \\
-        > dist.txt
-
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        mash: \$(mash --version 2>&1)
-    END_VERSIONS
-    """
-
-    stub:
-    def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}"
-    """
-    touch ${prefix}.msh
-    touch ${prefix}.mash_stats
+        > ${prefix}-dist.txt
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

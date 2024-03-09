@@ -3,6 +3,7 @@ set -o pipefail
 
 # input
 fasta=$1
+prefix=$2
 
 # make each sequence a single line
 cat ${fasta} | sed 's/>.*$/@&@/g' | tr -d '\n' | tr '@' '\n' | grep -v '>' | tail -n +2 | awk '{print toupper($0)}' > seqs
@@ -39,8 +40,8 @@ filter_outliers f1 f2
 filter_outliers f2 f3
 
 # output summary of filtered samples
-echo "total,filter1,filter2,filter3" > input-qc-summary.csv
-echo "$(cat seqs | wc -l),$(cat f1 | wc -l),$(cat f2 | wc -l),$(cat f3 | wc -l)" >> input-qc-summary.csv
+echo "total,filter1,filter2,filter3" > ${prefix}-qc-summary.csv
+echo "$(cat seqs | wc -l),$(cat f1 | wc -l),$(cat f2 | wc -l),$(cat f3 | wc -l)" >> ${prefix}-qc-summary.csv
 # output cleaned sequences & clean up
-cat f3 | awk -v OFS='\n' '{print ">"NR, $1 > NR".fa"}'
+cat f3 | awk -v OFS='\n' -v prefix=${prefix} '{print ">"prefix"-"NR, $1}' > ${prefix}.clean.fa
 rm seqs f1 f2 f3

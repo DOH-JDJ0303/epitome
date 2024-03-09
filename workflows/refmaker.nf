@@ -31,12 +31,15 @@ ch_multiqc_custom_methods_description = params.multiqc_methods_description ? fil
     IMPORT LOCAL MODULES/SUBWORKFLOWS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
-include { INPUT_QC  } from '../modules/local/input-qc'
-include { MASH      } from '../modules/local/mash'
-include { CLUSTER   } from '../modules/local/cluster'
-include { MAFFT     } from '../modules/local/mafft'
-include { CONSENSUS } from '../modules/local/consensus'
-include { BLASTN    } from '../modules/local/blastn'
+include { INPUT_QC     } from '../modules/local/input-qc'
+include { MASH         } from '../modules/local/mash'
+include { CLUSTER      } from '../modules/local/cluster'
+include { SEQTK_SUBSEQ } from '../modules/local/seqtk_subseq'
+include { MAFFT        } from '../modules/local/mafft'
+include { CONSENSUS    } from '../modules/local/consensus'
+include { BLASTN       } from '../modules/local/blastn'
+include { SUMMARY      } from '../modules/local/summary'
+
 
 //
 // SUBWORKFLOW: Consisting of a mix of local and nf-core/modules
@@ -69,12 +72,12 @@ workflow REFMAKER {
 
     Channel.fromPath(params.input)
         .splitCsv(header:true)
-        .map{ file(it.assembly) }
-        .set{ manifest }
+        .map{ tuple(it.taxa, it.segment, file(it.assembly, checkIfExists: true)) }
+        .set{ manifest } 
     
     // MODULE: Filter low quality sequences
     INPUT_QC(
-        manifest.splitFasta().collectFile(name: "all.fa")
+        manifest
     )
 
     //
@@ -90,36 +93,40 @@ workflow REFMAKER {
         MASH.out.dist
     )
 
+    // MODULE: SEQTK_SUBSEQ
     CLUSTER
         .out
         .results
         .splitCsv(header: true)
-        .map{ tuple(file(it.seq).getBaseName(), it.cluster) }
-        .join(INPUT_QC.out.assemblies.flatten().map{ assembly -> [ file(assembly).getBaseName(), assembly ] }, by: 0)
-        .groupTuple(by: 1)
-        .map{ id, cluster, assembly -> [ cluster, assembly ] }
+        .map{ tuple(it.taxa, it.segment, it.cluster, it.seq) }
+        .groupTuple(by: [0,1,2])
+        .combine(INPUT_QC.out.assemblies, by: [0,1])
         .set{ clusters }
+
+    SEQTK_SUBSEQ(
+        clusters
+    )
 
     // MODULE: MAFFT
     MAFFT(
-        clusters
+        SEQTK_SUBSEQ.out.sequences
     )
 
     // MODULE: Create consensus sequences
     CONSENSUS(
         MAFFT.out.fa
     )
-    
-    CONSENSUS
-        .out
-        .fa
-        .map{ consensus -> file(consensus) }
-        .splitFasta()
-        .collectFile(name: "all-consensus.fa")
-        .set{ all_consensus }
+
+    // MODULE: Run blastn
 
     BLASTN(
-        all_consensus
+        CONSENSUS.out.fa.groupTuple(by: [0,1])
+    )
+
+    // MODULE: Create summary
+    SUMMARY(
+        CLUSTER.out.results.splitText().collectFile(name: "all-clusters.csv"),
+        BLASTN.out.results.splitText().collectFile(name: "all-blastn.tsv")
     )
     CUSTOM_DUMPSOFTWAREVERSIONS (
         ch_versions.unique().collectFile(name: 'collated_versions.yml')

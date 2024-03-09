@@ -1,20 +1,22 @@
 process CLUSTER {
+    tag "${prefix}"
     label 'process_low'
     container 'docker.io/johnjare/spree:1.0'
 
     input:
-    path dist
+    tuple val(taxa), val(segment), path(dist)
 
     output:
-    path "clusters.csv", emit: results
-    path "clusters.jpg", emit: plot
+    path "*.csv", emit: results
+    path "*.jpg", emit: plot
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
+    prefix = "${taxa}-${segment}"
     """
     # run script
-    cluster.R ${dist} ${params.threshold}
+    cluster.R ${dist} "${taxa}" "${segment}" ${params.threshold}
     """
 }

@@ -5,7 +5,11 @@ library(ggtree)
 
 args <- commandArgs(trailingOnly = T)
 dist_path <- args[1]
-threshold <- args[2]
+taxa_name <- args[2]
+segment_name <- args[3]
+threshold <- args[4]
+
+file.name <- paste(taxa_name,segment_name,sep="-")
 
 
 dist.mat <- read_tsv(dist_path, col_names = c("ID1","ID2","DIST","PVAL","HASHES")) %>%
@@ -20,9 +24,12 @@ tree <- hclust(dist.mat, method = "complete")
 clusters <- cutree(tree, h = as.numeric(threshold)) %>%
   data.frame() %>%
   rownames_to_column(var = "seq") %>%
-  rename(cluster = 2)
+  rename(cluster = 2) %>%
+  mutate(taxa = taxa_name,
+         segment = segment_name) %>%
+  select(seq, taxa, segment, cluster)
 
-write.csv(clusters, file = 'clusters.csv', quote = F, row.names = F)
+write.csv(clusters, file = paste0(file.name,'.csv'), quote = F, row.names = F)
 
 p <- ggtree(tree)%<+%clusters+
   geom_tippoint(aes(color = as.character(cluster)))+
@@ -39,4 +46,4 @@ hght=n_iso/100
 if(hght < 200){
   hght <- 10
 }
-ggsave(plot = p, filename = "clusters.jpg", dpi = 300, width = wdth, height = hght, limitsize=F)
+ggsave(plot = p, filename = paste0(file.name,'.jpg'), dpi = 300, width = wdth, height = hght, limitsize=F)

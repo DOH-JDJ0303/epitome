@@ -1,20 +1,31 @@
 process INPUT_QC {
+    tag "${prefix}"
     label 'process_low'
     container 'docker.io/jdj0303/bigbacter-base:1.0.0'
+    stageInMode 'copy'
 
     input:
-    path assemblies
+    tuple val(taxa), val(segment), path(sequences)
 
     output:
-    path "*.fa",                 emit: assemblies
-    path "input-qc-summary.csv", emit: summary
+    tuple val(taxa), val(segment), path("${prefix}.clean.fa"), emit: assemblies
+    path "${prefix}-qc-summary.csv",             emit: summary
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
+    prefix = "${taxa}-${segment}"
+
     """
+    seqs=${sequences}
+    # check if file is compressed
+    if [[ ${sequences} =~ \.gz\$ ]];
+    then
+        gzip -d ${sequences}
+        seqs=\${seqs%.gz}
+    fi
     # filter sequences
-    input-qc.sh ${assemblies} #&& rm ${assemblies}
+    input-qc.sh \${seqs}  ${prefix}
     """
 }

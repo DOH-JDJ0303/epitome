@@ -36,5 +36,3 @@ done
 echo ">${name}" > ${name}.fa
 ## sort sites and collapse to single line.
 cat site-list.txt | sort -nk 1 | cut -f 4 | tr -d '\n -' | sed 's/$/\n/g' >> ${name}.fa
-## save sequence length 
-echo ${seq_len} > length.csv
