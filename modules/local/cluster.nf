@@ -1,6 +1,6 @@
 process CLUSTER {
     tag "${prefix}"
-    label 'process_low'
+    label 'process_high'
     container 'docker.io/johnjare/spree:1.0'
 
     input:
