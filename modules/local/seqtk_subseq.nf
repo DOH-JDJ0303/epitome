@@ -8,7 +8,7 @@ process SEQTK_SUBSEQ {
         'quay.io/biocontainers/seqtk:1.4--he4a0461_1' }"
 
     input:
-    tuple val(taxa), val(segment), val(cluster), val(contigs), path(sequences)
+    tuple val(taxa), val(segment), val(cluster), val(contigs), path(sequences), val(seq_count)
 
     output:
     tuple val(taxa), val(segment), val(cluster), path("${prefix}.fa"), emit: sequences

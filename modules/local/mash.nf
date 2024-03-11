@@ -7,11 +7,11 @@ process MASH {
         'quay.io/biocontainers/mash:2.3--he348c14_1' }"
 
     input:
-    tuple val(taxa), val(segment), path(sequences)
+    tuple val(taxa), val(segment), path(sequences), val(seq_count)
 
     output:
-    tuple val(taxa), val(segment), path("${prefix}-dist.txt"), emit: dist
-    path "versions.yml",                                       emit: versions
+    tuple val(taxa), val(segment), path("${prefix}-dist.txt"), val(seq_count), emit: dist
+    path "versions.yml",                                                       emit: versions
 
     when:
     task.ext.when == null || task.ext.when

@@ -31,14 +31,15 @@ ch_multiqc_custom_methods_description = params.multiqc_methods_description ? fil
     IMPORT LOCAL MODULES/SUBWORKFLOWS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
-include { INPUT_QC     } from '../modules/local/input-qc'
-include { MASH         } from '../modules/local/mash'
-include { CLUSTER      } from '../modules/local/cluster'
-include { SEQTK_SUBSEQ } from '../modules/local/seqtk_subseq'
-include { MAFFT        } from '../modules/local/mafft'
-include { CONSENSUS    } from '../modules/local/consensus'
-include { BLASTN       } from '../modules/local/blastn'
-include { SUMMARY      } from '../modules/local/summary'
+include { INPUT_QC      } from '../modules/local/input-qc'
+include { MASH          } from '../modules/local/mash'
+include { CLUSTER       } from '../modules/local/cluster'
+include { CLUSTER_LARGE } from '../modules/local/cluster'
+include { SEQTK_SUBSEQ  } from '../modules/local/seqtk_subseq'
+include { MAFFT         } from '../modules/local/mafft'
+include { CONSENSUS     } from '../modules/local/consensus'
+include { BLASTN        } from '../modules/local/blastn'
+include { SUMMARY       } from '../modules/local/summary'
 
 
 //
@@ -89,20 +90,26 @@ workflow REFMAKER {
     ch_versions = ch_versions.mix(MASH.out.versions.first())
 
     // MODULE: CLUSTER
+    MASH.out.dist.filter{ taxa, segment, dist, count -> count.toInteger() <= 2000 }.set{ small_datasets }
+    MASH.out.dist.filter{ taxa, segment, dist, count -> count.toInteger() > 2000 }.set{ large_datasets }
     CLUSTER (
-        MASH.out.dist
+        small_datasets
+    )
+    CLUSTER_LARGE (
+        large_datasets
     )
 
-    // MODULE: SEQTK_SUBSEQ
     CLUSTER
         .out
         .results
         .splitCsv(header: true)
+        .concat( CLUSTER_LARGE.out.results.splitCsv(header: true) )
         .map{ tuple(it.taxa, it.segment, it.cluster, it.seq) }
         .groupTuple(by: [0,1,2])
         .combine(INPUT_QC.out.assemblies, by: [0,1])
         .set{ clusters }
 
+    // MODULE: SEQTK_SUBSEQ
     SEQTK_SUBSEQ(
         clusters
     )
