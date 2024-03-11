@@ -11,8 +11,8 @@ process SEQTK_SUBSEQ {
     tuple val(taxa), val(segment), val(cluster), val(contigs), path(sequences), val(seq_count)
 
     output:
-    tuple val(taxa), val(segment), val(cluster), path("${prefix}.fa"), emit: sequences
-    path "versions.yml",                                               emit: versions
+    tuple val(taxa), val(segment), val(cluster), path("${prefix}.fa"), val(seq_count), emit: sequences
+    path "versions.yml",                                                               emit: versions
 
     when:
     task.ext.when == null || task.ext.when
@@ -27,21 +27,6 @@ process SEQTK_SUBSEQ {
         $args \\
         $sequences \\
         contigs.txt > ${prefix}.fa
-
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        seqtk: \$(echo \$(seqtk 2>&1) | sed 's/^.*Version: //; s/ .*\$//')
-    END_VERSIONS
-    """
-
-    stub:
-    def prefix = task.ext.prefix ?: "${meta.id}"
-    def ext = "fa"
-    if ("$sequences" ==~ /.+\.fq|.+\.fq.gz|.+\.fastq|.+\.fastq.gz/) {
-        ext = "fq"
-    }
-    """
-    echo "" | gzip > ${sequences}${prefix}.${ext}.gz
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

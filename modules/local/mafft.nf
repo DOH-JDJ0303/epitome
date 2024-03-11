@@ -22,22 +22,14 @@ process MAFFT {
     prefix = "${taxa}-${segment}-${cluster}"
 
     """
-    seq_count=\$(cat ${seqs} | grep '>' | wc -l)
-    if [[ \${seq_count} > 1 ]]
-    then
-        # run mafft
-        mafft \\
-            ${args} \\
-            --thread ${task.cpus} \\
-            --auto \\
-            ${seqs} \\
-            > ${prefix}.mafft.fa
-    else
-        echo "Only one sequence in this cluster. Returning input fasta as alignment."
-        cat ${seqs} > ${prefix}.maff.fa
-    fi
+    # run mafft
+    mafft \\
+        ${args} \\
+        --thread ${task.cpus} \\
+        --auto \\
+        ${seqs} \\
+        > ${prefix}.mafft.fa
     
-
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         mafft: \$(mafft --version 2>&1 | sed 's/^v//' | sed 's/ (.*)//')

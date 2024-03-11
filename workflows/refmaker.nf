@@ -107,6 +107,7 @@ workflow REFMAKER {
         .map{ tuple(it.taxa, it.segment, it.cluster, it.seq) }
         .groupTuple(by: [0,1,2])
         .combine(INPUT_QC.out.assemblies, by: [0,1])
+        .map{ taxa, segment, cluster, contigs, seqs, count -> [ taxa, segment, cluster, contigs, seqs, contigs.size() ] }
         .set{ clusters }
 
     // MODULE: SEQTK_SUBSEQ
@@ -116,12 +117,24 @@ workflow REFMAKER {
 
     // MODULE: MAFFT
     MAFFT(
-        SEQTK_SUBSEQ.out.sequences
+        SEQTK_SUBSEQ
+            .out
+            .sequences
+            .filter{ taxa, segment, cluster, seqs, count -> count > 1 }
+            .map{ taxa, segment, cluster, seqs, count -> [ taxa, segment, cluster, seqs ] }
     )
+    // recombine with singletons
+    SEQTK_SUBSEQ
+        .out
+        .sequences
+        .filter{ taxa, segment, cluster, seqs, count -> count == 1 }
+        .map{ taxa, segment, cluster, seqs, count -> [ taxa, segment, cluster, seqs ] }
+        .concat(MAFFT.out.fa)
+        .set{ alignments }
 
     // MODULE: Create consensus sequences
     CONSENSUS(
-        MAFFT.out.fa
+        alignments
     )
 
     // MODULE: Run blastn
