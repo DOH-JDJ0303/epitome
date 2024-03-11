@@ -19,7 +19,7 @@ process INPUT_QC {
     """
     seqs=${sequences}
     # check if file is compressed
-    if [[ ${sequences} == *.gz\$ ]];
+    if [[ "${sequences}" == *".gz" ]];
     then
         gzip -d ${sequences}
         seqs=\${seqs%.gz}

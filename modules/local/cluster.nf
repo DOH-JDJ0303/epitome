@@ -2,6 +2,7 @@ process CLUSTER {
     tag "${prefix}"
     label "process_high"
     container 'docker.io/johnjare/spree:1.0'
+    stageInMode 'copy'
 
     input:
     tuple val(taxa), val(segment), path(dist), val(seq_count)
@@ -16,8 +17,9 @@ process CLUSTER {
     script:
     prefix = "${taxa}-${segment}"
     """
+    gzip -d ${dist}
     # run script
-    cluster.R ${dist} "${taxa}" "${segment}" ${params.threshold}
+    cluster.R *.txt "${taxa}" "${segment}" ${params.threshold}
     """
 }
 
@@ -39,7 +41,8 @@ process CLUSTER_LARGE {
     script:
     prefix = "${taxa}-${segment}"
     """
+    gzip -d ${dist}
     # run script
-    cluster.R ${dist} "${taxa}" "${segment}" ${params.threshold}
+    cluster.R *.txt "${taxa}" "${segment}" ${params.threshold}
     """
 }

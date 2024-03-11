@@ -10,8 +10,8 @@ process MASH {
     tuple val(taxa), val(segment), path(sequences), val(seq_count)
 
     output:
-    tuple val(taxa), val(segment), path("${prefix}-dist.txt"), val(seq_count), emit: dist
-    path "versions.yml",                                                       emit: versions
+    tuple val(taxa), val(segment), path("${prefix}-dist.txt.gz"), val(seq_count), emit: dist
+    path "versions.yml",                                                          emit: versions
 
     when:
     task.ext.when == null || task.ext.when
@@ -36,7 +36,7 @@ process MASH {
         -p $task.cpus \\
         sketch.msh \\
         sketch.msh \\
-        > ${prefix}-dist.txt
+        | gzip > ${prefix}-dist.txt.gz
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
