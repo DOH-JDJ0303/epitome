@@ -34,7 +34,7 @@ process MAFFT {
             > ${prefix}.mafft.fa
     else
         echo "Only one sequence in this cluster. Returning input fasta as alignment."
-        cp ${seqs} ${prefix}.maff.fa
+        cat ${seqs} > ${prefix}.maff.fa
     fi
     
 
