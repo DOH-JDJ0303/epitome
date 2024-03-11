@@ -16,9 +16,8 @@ process CLUSTER {
     script:
     prefix = "${taxa}-${segment}"
     """
-    gzip -d ${dist} && dist_file=\${seqs%.gz}
     # run script
-    cluster.R \${dist_file} "${taxa}" "${segment}" ${params.threshold}
+    cluster.R ${dist} "${taxa}" "${segment}" ${params.threshold}
     """
 }
 
@@ -40,8 +39,7 @@ process CLUSTER_LARGE {
     script:
     prefix = "${taxa}-${segment}"
     """
-    gzip -d ${dist} && dist_file=\${seqs%.gz}
     # run script
-    cluster.R \${dist_file} "${taxa}" "${segment}" ${params.threshold}
+    cluster.R ${dist} "${taxa}" "${segment}" ${params.threshold}
     """
 }
