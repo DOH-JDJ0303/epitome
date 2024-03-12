@@ -19,7 +19,7 @@ process CLUSTER {
     """
     gzip -d ${dist}
     # run script
-    cluster.R *.txt "${taxa}" "${segment}" ${params.threshold}
+    cluster.R *.txt "${taxa}" "${segment}" ${params.dist_threshold}
     """
 }
 

@@ -15,9 +15,10 @@ clusters <- read.csv(clusters_file, header = F, col.names = c("seq","taxa","segm
 blastn <- read_tsv(blastn_file, col_names = c("taxa","segment","qaccver", "saccver","qlen","slen","pident","length","mismatch","gapopen","qstart","qend","sstart","send","evalue","bitscore")) %>%
   filter(qaccver != saccver) %>%
   group_by(taxa, segment, qaccver) %>%
-  summarize(length = max(qlen), min_aln = min(length), max_aln = max(length), min_pident = min(pident), max_pident = max(pident)) %>%
+  summarize(seq_len = max(qlen), min_aln = min(length), max_aln = max(length), min_pident = min(pident), max_pident = max(pident)) %>%
   ungroup() %>%
-  rename(seq = qaccver)
+  rename(seq = qaccver,
+         length = seq_len)
 
 clusters %>%
   full_join(blastn, by = "seq") %>%

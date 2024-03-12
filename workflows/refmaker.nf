@@ -73,7 +73,7 @@ workflow REFMAKER {
 
     Channel.fromPath(params.input)
         .splitCsv(header:true)
-        .map{ tuple(it.taxa, it.segment, file(it.assembly, checkIfExists: true)) }
+        .map{ tuple(it.taxa, it.segment, file(it.assembly, checkIfExists: true), it.length) }
         .set{ manifest } 
     
     // MODULE: Filter low quality sequences
@@ -145,7 +145,7 @@ workflow REFMAKER {
 
     // MODULE: Create summary
     SUMMARY(
-        CLUSTER.out.results.splitText().collectFile(name: "all-clusters.csv"),
+        CLUSTER.out.results.concat(CLUSTER_LARGE.out.results).splitText().collectFile(name: "all-clusters.csv"),
         BLASTN.out.results.splitText().collectFile(name: "all-blastn.tsv")
     )
     CUSTOM_DUMPSOFTWAREVERSIONS (

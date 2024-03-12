@@ -5,7 +5,7 @@ process INPUT_QC {
     stageInMode 'copy'
 
     input:
-    tuple val(taxa), val(segment), path(sequences)
+    tuple val(taxa), val(segment), path(sequences), val(expected_length)
 
     output:
     tuple val(taxa), val(segment), path("${prefix}.clean.fa"), env(seq_count), emit: assemblies
@@ -25,8 +25,8 @@ process INPUT_QC {
         seqs=\${seqs%.gz}
     fi
     # filter sequences
-    input-qc.sh \${seqs}  ${prefix}
+    input-qc.sh \${seqs} ${prefix} "${expected_length}" "${params.len_threshold}"
     # set sequence count
-    seq_count=\$(cat ${prefix}-qc-summary.csv | cut -f 4 -d ',' | grep -v 'filter3' | tr -d '\t\r\n ')
+    seq_count=\$(cat ${prefix}-qc-summary.csv | cut -f 5 -d ',' | grep -v 'filter4' | tr -d '\t\r\n ')
     """
 }

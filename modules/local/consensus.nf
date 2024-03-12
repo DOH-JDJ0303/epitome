@@ -17,6 +17,6 @@ process CONSENSUS {
 
     """
     # run script
-    consensus.sh "${prefix}" ${aln}
+    consensus.sh "${prefix}" ${aln} "${task.cpus}"
     """
 }

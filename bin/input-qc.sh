@@ -4,13 +4,30 @@ set -o pipefail
 # input
 fasta=$1
 prefix=$2
+expected_length=$3
+length_threshold=$4
 
 # make each sequence a single line
 cat ${fasta} | sed 's/>.*$/@&@/g' | tr -d '\n' | tr '@' '\n' | grep -v '>' | tail -n +2 | awk '{print toupper($0)}' > seqs
 
-# remove sequences with ambiguous bases, and condense replicates
-cat seqs | sort | uniq | grep -vE 'R|Y|M|K|S|W|H|B|V|D|N' > f1
+#---- FILTER 1: CONDENSE REPLICATES ----#
+cat seqs | sort | uniq > f1
 
+#---- FILTER 2: REMOVE SEQUENCES WITH AMBIGUOUS BASES ----#
+cat f1 | grep -vE 'R|Y|M|K|S|W|H|B|V|D|N' > f2
+if [ ! -s f2 ]
+then
+    echo "Error: All sequences had ambiguous bases!" && exit 1
+fi
+
+#---- FILTER 3: REMOVE SEQUENCES DIFFERING BY MORE THAN A PERCENTAGE OF THE EXPECTED LENGTH ----#
+cat f2 | awk -v exp_len=${expected_length} -v len_thresh=${length_threshold} 'length($1) > exp_len*(1-len_thresh) && length($1) < exp_len*(1+len_thresh) {print $0}' > f3
+if [ ! -s f3 ]
+then
+    echo "Error: All sequences differ from the expected length: ${expected_length}!" && exit 1
+fi
+
+#---- FILTER 4: REMOVE OUTLIERS BASED ON LENGTH AND GC CONTENT ----#
 # function for filtering outliers based on sequence length and GC content
 filter_outliers () {
     # input
@@ -34,14 +51,15 @@ filter_outliers () {
 }
 
 # filter outliers
-## round 1
-filter_outliers f1 f2
-## round 2
-filter_outliers f2 f3
+filter_outliers f3 f4
+if [ ! -s f4 ]
+then
+    echo "Error: All sequences were considered outliers. This should not happen. Check your sequences and parameters." && exit 1
+fi
 
 # output summary of filtered samples
-echo "total,filter1,filter2,filter3" > ${prefix}-qc-summary.csv
-echo "$(cat seqs | wc -l),$(cat f1 | wc -l),$(cat f2 | wc -l),$(cat f3 | wc -l)" >> ${prefix}-qc-summary.csv
+echo "total,filter1,filter2,filter3,filter4" > ${prefix}-qc-summary.csv
+echo "$(cat seqs | wc -l),$(cat f1 | wc -l),$(cat f2 | wc -l),$(cat f3 | wc -l),$(cat f4 | wc -l)" >> ${prefix}-qc-summary.csv
 # output cleaned sequences & clean up
 cat f3 | awk -v OFS='\n' -v prefix=${prefix} '{print ">"prefix"-"NR, $1}' > ${prefix}.clean.fa
-rm seqs f1 f2 f3
+rm seqs f1 f2 f3 f4
