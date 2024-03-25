@@ -67,7 +67,7 @@ include { CUSTOM_DUMPSOFTWAREVERSIONS } from '../modules/nf-core/custom/dumpsoft
 // Info required for completion email and summary
 def multiqc_report = []
 
-workflow REFMAKER {
+workflow EPITOME {
 
     ch_versions = Channel.empty()
 
@@ -146,7 +146,8 @@ workflow REFMAKER {
     // MODULE: Create summary
     SUMMARY(
         CLUSTER.out.results.concat(CLUSTER_LARGE.out.results).splitText().collectFile(name: "all-clusters.csv"),
-        BLASTN.out.results.splitText().collectFile(name: "all-blastn.tsv")
+        BLASTN.out.results.splitText().collectFile(name: "all-blastn.tsv"),
+        CONSENSUS.out.len.splitText().collectFile(name: "all-lengths.csv")
     )
     CUSTOM_DUMPSOFTWAREVERSIONS (
         ch_versions.unique().collectFile(name: 'collated_versions.yml')

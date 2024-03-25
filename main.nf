@@ -1,11 +1,9 @@
 #!/usr/bin/env nextflow
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    nf-core/refmaker
+    DOH-JDJ0303/epitome
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Github : https://github.com/nf-core/refmaker
-    Website: https://nf-co.re/refmaker
-    Slack  : https://nfcore.slack.com/channels/refmaker
+    Github : https://github.com/DOH-JDJ0303/epitome
 ----------------------------------------------------------------------------------------
 */
 
@@ -52,13 +50,13 @@ WorkflowMain.initialise(workflow, params, log)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
-include { REFMAKER } from './workflows/refmaker'
+include { EPITOME } from './workflows/epitome'
 
 //
 // WORKFLOW: Run main nf-core/refmaker analysis pipeline
 //
-workflow NFCORE_REFMAKER {
-    REFMAKER ()
+workflow NFCORE_EPITOME {
+    EPITOME ()
 }
 
 /*
@@ -72,7 +70,7 @@ workflow NFCORE_REFMAKER {
 // See: https://github.com/nf-core/rnaseq/issues/619
 //
 workflow {
-    NFCORE_REFMAKER ()
+    NFCORE_EPITOME ()
 }
 
 /*
