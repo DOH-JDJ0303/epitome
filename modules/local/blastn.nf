@@ -1,4 +1,4 @@
-process BLASTN {
+process BLASTN_AVA {
     tag "${prefix}"
     label 'process_medium'
 
@@ -33,6 +33,43 @@ process BLASTN {
         > ${prefix}-blast.txt
     # clean up
     rm all.fa
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        blast: \$(blastn -version 2>&1 | sed 's/^.*blastn: //; s/ .*\$//')
+    END_VERSIONS
+    """
+}
+
+process BLASTN_SEED {
+    label 'process_medium'
+
+    conda "bioconda::blast=2.14.1"
+    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
+        'https://depot.galaxyproject.org/singularity/blast:2.14.1--pl5321h6f7f691_0':
+        'quay.io/biocontainers/blast:2.14.1--pl5321h6f7f691_0' }"
+
+    input:
+    path consensus
+    path seeds
+
+    output:
+    path "seeds-blast.txt", emit: results
+    path "versions.yml",    emit: versions
+
+    when:
+    task.ext.when == null || task.ext.when
+
+    script:
+    def args = task.ext.args ?: ''
+    """
+    # run Blastn
+    blastn \\
+        -num_threads ${task.cpus} \\
+        -subject ${seeds} \\
+        -query ${consensus} \\
+        ${args} \\
+        > seeds-blast.txt
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

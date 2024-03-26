@@ -7,8 +7,8 @@ process CONSENSUS {
     tuple val(taxa), val(segment), val(cluster), path(aln)
 
     output:
-    tuple val(taxa), val(segment), val(cluster), path("${prefix}.fa"), emit: fa
-    path "${prefix}_length.csv",                                       emit: len
+    tuple val(taxa), val(segment), val(cluster), path("${prefix}.fa"), env(length), emit: fa
+    path "${prefix}_length.csv",                                                   emit: len
 
     when:
     task.ext.when == null || task.ext.when
@@ -20,6 +20,7 @@ process CONSENSUS {
     # run script
     consensus.sh "${prefix}" ${aln} "${task.cpus}"
     # collect consensus size info
-    echo "${prefix},\$(cat ${prefix}.fa | grep -v '>' | tr -d '\n\t ' | wc -c)" > ${prefix}_length.csv
+    length=\$(cat ${prefix}.fa | grep -v '>' | tr -d '\n\t ' | wc -c)
+    echo "${prefix},\${length}" > ${prefix}_length.csv
     """
 }

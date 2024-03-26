@@ -38,7 +38,8 @@ include { CLUSTER_LARGE } from '../modules/local/cluster'
 include { SEQTK_SUBSEQ  } from '../modules/local/seqtk_subseq'
 include { MAFFT         } from '../modules/local/mafft'
 include { CONSENSUS     } from '../modules/local/consensus'
-include { BLASTN        } from '../modules/local/blastn'
+include { FASTANI_AVA   } from '../modules/local/fastani'
+include { FASTANI_SEEDS } from '../modules/local/fastani'
 include { SUMMARY       } from '../modules/local/summary'
 
 
@@ -138,16 +139,31 @@ workflow EPITOME {
     )
 
     // MODULE: Run blastn
-
-    BLASTN(
-        CONSENSUS.out.fa.groupTuple(by: [0,1])
+    FASTANI_AVA (
+        CONSENSUS.out.fa.groupTuple(by: [0,1]).map{ taxa, segment, cluster, assembly, length -> [ taxa, segment, assembly, length.min() ] }
     )
+
+    if(params.seeds){
+        Channel
+            .fromPath(params.seeds)
+            .splitCsv(header:true)
+            .map{ tuple(it.ref, file(it.assembly)) }
+            .set{ seeds }
+        // MODULE: Run blastn
+        FASTANI_SEEDS (
+            CONSENSUS.out.fa.map{ taxa, segment, cluster, assembly, length -> assembly }.collect(),
+            seeds.map{ ref, assembly -> assembly }.collect()
+        )
+    }
+
 
     // MODULE: Create summary
     SUMMARY(
         CLUSTER.out.results.concat(CLUSTER_LARGE.out.results).splitText().collectFile(name: "all-clusters.csv"),
-        BLASTN.out.results.splitText().collectFile(name: "all-blastn.tsv"),
-        CONSENSUS.out.len.splitText().collectFile(name: "all-lengths.csv")
+        CONSENSUS.out.len.splitText().collectFile(name: "all-lengths.csv"),
+        FASTANI_AVA.out.ani.splitText().collectFile(name: "all-ani.tsv"),
+        params.seeds ? FASTANI_SEEDS.out.ani : [],
+        params.seeds ? file(params.seeds) : []
     )
     CUSTOM_DUMPSOFTWAREVERSIONS (
         ch_versions.unique().collectFile(name: 'collated_versions.yml')

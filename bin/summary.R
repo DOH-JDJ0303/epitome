@@ -6,8 +6,18 @@ library(tidyverse)
 #---- ARGUMENTS ----#
 args <- commandArgs(trailingOnly = T)
 clusters_file <- args[1]
-blastn_file <- args[2]
-lengths_file <- args[3]
+lengths_file <- args[2]
+fastani_ava_file <- args[3]
+fastani_seeds_file <- args[4]
+seeds_file <- args[5]
+
+#---- FUNCTIONS ----#
+basename_fa <- function(path){
+    result <- basename(path) %>%
+      str_remove_all(pattern = ".fa$")
+    return(result)
+    
+}
 
 #---- LOAD & JOIN CLUSTER & LENGTH DATA ---- #
 clusters <- read.csv(clusters_file, header = F, col.names = c("seq","taxa","segment","cluster")) %>%
@@ -21,61 +31,47 @@ lengths <- read.csv(lengths_file, header = F, col.names = c("seq","length"))
 
 cluster_lengths <- full_join(clusters, lengths, by = "seq")
 
-#---- LOAD BLASTN RESULTS & ADD MISSING ----#
-blastn <- read_tsv(blastn_file, col_names = c("taxa","segment","qaccver", "saccver","qlen","slen","pident","length","mismatch","gapopen","qstart","qend","sstart","send","evalue","bitscore"))
-# get list of pairwise comparisons, add back to blastn, filter by taxa & segment, then calculate ID
+#---- LOAD FASTANI AVA RESULTS & ADD MISSING ----#
+fastani_ava <- read_tsv(fastani_ava_file, col_names = c("query","ref","ani","mapped","total")) %>%
+  select(query, ref, ani) %>%
+  mutate(query = basename_fa(query),
+         ref = basename_fa(ref))
+# get list of pairwise comparisons, add back to fastani_ava, filter by taxa & segment, then calculate ID
 q_filt <- cluster_lengths %>%
-  mutate(qaccver = seq,
-         qtaxa = taxa,
-         qseg = segment,
-         qlength = length) %>%
-  select(qaccver, qtaxa, qseg, qlength)
-s_filt <- cluster_lengths %>%
-  mutate(saccver = seq,
+  select(seq, taxa, segment, length) %>%
+  rename(query = seq)
+r_filt <- cluster_lengths %>%
+  mutate(ref = seq,
          staxa=taxa,
-         sseg=segment,
-         slength = length) %>%
-  select(saccver,staxa, sseg, slength)
-blastn <- cluster_lengths %>%
+         sseg=segment) %>%
+  select(ref, staxa, sseg)
+fastani_ava <- cluster_lengths %>%
   select(seq) %>%
-  mutate(qaccver=seq,
+  mutate(query=seq,
          tmp='this works') %>%
   pivot_wider(names_from = "seq", values_from = "tmp" ) %>%
-  pivot_longer(names_to = "saccver", values_to = "tmp", 2:ncol(.)) %>%
-  select(qaccver, saccver) %>%
-  full_join(blastn, by = c("qaccver", "saccver")) %>%
-  full_join(q_filt, by = "qaccver") %>%
-  full_join(s_filt, by = "saccver") %>%
-  filter(qtaxa == staxa & qseg == sseg) %>%
-  mutate(taxa = qtaxa,
-         segment = qseg,
-         qlen = qlength,
-         slen = slength) %>%
-  drop_na(qaccver, saccver) %>%
-  select(-qtaxa, -qseg, -qlength, -staxa, -sseg) %>%
+  pivot_longer(names_to = "ref", values_to = "tmp", 2:ncol(.)) %>%
+  select(query, ref) %>%
+  full_join(fastani_ava, by = c("query", "ref")) %>%
+  full_join(q_filt, by = "query") %>%
+  full_join(r_filt, by = "ref") %>%
+  filter(taxa == staxa & segment == sseg) %>%
+  drop_na(query, ref) %>%
   mutate_all(~replace(., is.na(.), 0)) %>%
-  group_by(qaccver, saccver, taxa, segment, qlen) %>%
-  summarise(expected_length = max(slen), 
-            aligned = sum(length), 
-            unaligned = abs(expected_length - aligned), 
-            mismatch = sum(mismatch), 
-            gapopen = sum(gapopen), 
-            pident = 100*(expected_length - (unaligned+mismatch+gapopen)) / expected_length 
-          ) %>%
-  ungroup()
-write.csv(x=blastn, file = "full-blast.csv", quote = F, row.names = F)
+  select(-staxa, -sseg)
+write.csv(x=fastani_ava, file = "full-ani.csv", quote = F, row.names = F)
 #---- PLOT MATRIX ----#
 plot_matrix <- function(ts){
   # subset datafralsme & create plot
-  df <- blastn %>%
+  df <- fastani_ava %>%
     mutate(taxa_seg = paste(taxa,segment, sep = "-")) %>%
     filter(taxa_seg == ts)
-  p <-ggplot(df, aes(x=qaccver, y=saccver, fill = pident))+
+  p <-ggplot(df, aes(x=query, y=ref, fill = ani))+
       geom_tile()+
       theme_bw()+
       theme(axis.text.x = element_text(angle=90))
   
-  n <- df$qaccver %>% unique() %>% length()
+  n <- df$query %>% unique() %>% length()
   if(n > 10){
     dims <- n*0.5
   }else{
@@ -84,23 +80,46 @@ plot_matrix <- function(ts){
   ggsave(p, filename = paste0(ts,".jpg"), dpi = 300, height = dims, width = dims)
 }
 
-ts_list <- blastn %>%
+ts_list <- fastani_ava %>%
   mutate(taxa_seg = paste(taxa,segment, sep = "-")) %>%
   .$taxa_seg %>%
   unique()
 dev_null <- lapply(ts_list, FUN = plot_matrix)
 
-#---- JOIN FINAL DATASETS & SUMMARIZE ----#
-blastn <- blastn %>%
-  filter(qaccver != saccver) %>%
-  group_by(qaccver, taxa, segment) %>%
-  summarise(min_pident = round(min(pident), digits = 1), max_pident = round(max(pident), digits = 1)) %>%
-  rename(seq = qaccver) %>%
+#---- SUMMARIZE BLAST AVA FURTHER ----#
+fastani_ava <- fastani_ava %>%
+  filter(query != ref) %>%
+  group_by(query, taxa, segment) %>%
+  summarise(min_ani = round(min(ani), digits = 1), max_ani = round(max(ani), digits = 1)) %>%
+  rename(seq = query) %>%
   ungroup() %>%
   select(-taxa, -segment)
 
+#---- LOAD BLAST SEEDS RESULTS (IF SUPPLIED) ----#
+if(file.exists(fastani_seeds_file) & file.exists(seeds_file)){
+  seeds <- read.csv(seeds_file) %>% 
+    rename(seed = 1,
+           ref = 2) %>%
+    mutate(ref = basename_fa(ref))
+  fastani_ava <- read_tsv(fastani_seeds_file, col_names = c("query","ref","ani","mapped","total")) %>%
+    select(query, ref, ani) %>%
+    mutate(query = basename_fa(query),
+           ref = basename_fa(ref)) %>%
+    group_by(query) %>%
+    filter(ani == max(ani)) %>%
+    ungroup() %>%
+    filter(ani >= 95) %>%
+    mutate(ani = round(ani, digits = 1)) %>%
+    rename(seq = query,
+           seed_ani = ani) %>%
+    full_join(fastani_ava, by = "seq") %>%
+    left_join(seeds, by = "ref") %>%
+    select(seq, min_ani, max_ani, seed, seed_ani)
+}
+
+#---- JOIN FINAL DATASETS & SUMMARIZE ----#
 clusters %>%
-  full_join(blastn, by = "seq") %>%
+  full_join(fastani_ava, by = "seq") %>%
   full_join(lengths, by = "seq") %>%
-  select(seq,taxa,segment,cluster,n,length,min_pident,max_pident) %>%
+  select(seq,taxa,segment,cluster,n,length,min_ani,max_ani, seed, seed_ani) %>%
   write.csv(file = "summary.csv", quote = F, row.names = F)
