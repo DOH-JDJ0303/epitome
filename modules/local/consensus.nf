@@ -8,7 +8,8 @@ process CONSENSUS {
 
     output:
     tuple val(taxa), val(segment), val(cluster), path("${prefix}.fa"), env(length), emit: fa
-    path "${prefix}_length.csv",                                                   emit: len
+    path "${prefix}_length.csv",                                                    emit: len
+    path "versions.yml",                                                            emit: versions
 
     when:
     task.ext.when == null || task.ext.when
@@ -24,8 +25,8 @@ process CONSENSUS {
     echo "${prefix},\${length}" > ${prefix}_length.csv
 
     cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        consensus: \$(consensus.sh version)
-    END_VERSIONS
+        "${task.process}":
+            consensus: \$(consensus.sh version)
+        END_VERSIONS
     """
 }

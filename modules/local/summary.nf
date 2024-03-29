@@ -11,8 +11,10 @@ process SUMMARY {
 
 
     output:
-    path "*.csv", emit: summary
-    path "*.jpg", emit: plots
+    path "*.csv",        emit: summary
+    path "*.jpg",        emit: plots
+    path "versions.yml", emit: versions
+
 
     when:
     task.ext.when == null || task.ext.when
@@ -25,8 +27,8 @@ process SUMMARY {
     summary.R clusters-no-header.csv ${lengths} ${ani_ava} ${ani_seeds} ${seeds}
 
     cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        summary: \$(summary.R version)
-    END_VERSIONS
+        "${task.process}":
+            summary: \$(summary.R version)
+        END_VERSIONS
     """
 }

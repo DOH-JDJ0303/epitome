@@ -8,8 +8,10 @@ process CLUSTER {
     tuple val(taxa), val(segment), path(dist), val(seq_count)
 
     output:
-    path "*.csv", emit: results
-    path "*.jpg", emit: plot
+    path "*.csv",        emit: results
+    path "*.jpg",        emit: plot
+    path "versions.yml", emit: versions
+
 
     when:
     task.ext.when == null || task.ext.when
@@ -20,6 +22,11 @@ process CLUSTER {
     gzip -d ${dist}
     # run script
     cluster.R *.txt "${taxa}" "${segment}" ${params.dist_threshold}
+
+    cat <<-END_VERSIONS > versions.yml
+        "${task.process}":
+            cluster: \$(cluster.R version)
+        END_VERSIONS
     """
 }
 
@@ -32,8 +39,9 @@ process CLUSTER_LARGE {
     tuple val(taxa), val(segment), path(dist), val(seq_count)
 
     output:
-    path "*.csv", emit: results
-    path "*.jpg", emit: plot
+    path "*.csv",        emit: results
+    path "*.jpg",        emit: plot
+    path "versions.yml", emit: versions
 
     when:
     task.ext.when == null || task.ext.when
@@ -44,5 +52,10 @@ process CLUSTER_LARGE {
     gzip -d ${dist}
     # run script
     cluster.R *.txt "${taxa}" "${segment}" ${params.dist_threshold}
+    
+    cat <<-END_VERSIONS > versions.yml
+        "${task.process}":
+            cluster: \$(cluster.R version)
+        END_VERSIONS
     """
 }

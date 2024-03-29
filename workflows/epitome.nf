@@ -110,13 +110,13 @@ workflow EPITOME {
     CLUSTER (
         MASH.out.dist.filter{ taxa, segment, dist, count -> count.toInteger() <= 2000 }
     )
-    ch_versions = ch_versions.mix(CLUSTERS.out.versions.first())
+    ch_versions = ch_versions.mix(CLUSTER.out.versions.first())
 
     // Large datasets - requires much more memory!
     CLUSTER_LARGE (
         MASH.out.dist.filter{ taxa, segment, dist, count -> count.toInteger() > 2000 }
     )
-    ch_versions = ch_versions.mix(CLUSTERS_LARGE.out.versions.first())
+    ch_versions = ch_versions.mix(CLUSTER_LARGE.out.versions.first())
 
     // Combine small and large dataset cluster results and add clean sequence paths
     CLUSTER
