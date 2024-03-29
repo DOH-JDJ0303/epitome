@@ -22,5 +22,10 @@ process CONSENSUS {
     # collect consensus size info
     length=\$(cat ${prefix}.fa | grep -v '>' | tr -d '\n\t ' | wc -c)
     echo "${prefix},\${length}" > ${prefix}_length.csv
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        consensus: \$(consensus.sh version)
+    END_VERSIONS
     """
 }

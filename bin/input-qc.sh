@@ -1,5 +1,13 @@
 #!/bin/bash
+version="1.0"
+
+# input-qc.sh
+# Author: Jared Johnson, jared.johnson@doh.wa.gov
+
 set -o pipefail
+
+# get version info
+if [ "$1" == "version" ]; then echo "${version}" && exit 0; fi
 
 # input
 fasta=$1
