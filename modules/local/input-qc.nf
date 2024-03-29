@@ -28,5 +28,10 @@ process INPUT_QC {
     input-qc.sh \${seqs} ${prefix} "${expected_length}" "${params.len_threshold}"
     # set sequence count
     seq_count=\$(cat ${prefix}-qc-summary.csv | cut -f 5 -d ',' | grep -v 'filter4' | tr -d '\t\r\n ')
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        input-qc: \$(input-qc.sh version)
+    END_VERSIONS
     """
 }

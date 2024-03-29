@@ -1,7 +1,8 @@
 #!/usr/bin/env Rscript
+version <- "1.0"
 
-#---- LIBRARIES ----#
-library(tidyverse)
+# summary.R
+# Author: Jared Johnson, jared.johnson@doh.wa.gov
 
 #---- ARGUMENTS ----#
 args <- commandArgs(trailingOnly = T)
@@ -10,6 +11,15 @@ lengths_file <- args[2]
 fastani_ava_file <- args[3]
 fastani_seeds_file <- args[4]
 seeds_file <- args[5]
+
+#---- VERSION ----#
+if(clusters_file == "version"){
+  cat(version, sep = "\n")
+  quit(status=0)
+}
+
+#---- LIBRARIES ----#
+library(tidyverse)
 
 #---- FUNCTIONS ----#
 basename_fa <- function(path){

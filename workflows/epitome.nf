@@ -42,7 +42,6 @@ include { FASTANI_AVA   } from '../modules/local/fastani'
 include { FASTANI_SEEDS } from '../modules/local/fastani'
 include { SUMMARY       } from '../modules/local/summary'
 
-
 //
 // SUBWORKFLOW: Consisting of a mix of local and nf-core/modules
 //
@@ -72,34 +71,54 @@ workflow EPITOME {
 
     ch_versions = Channel.empty()
 
-    Channel.fromPath(params.input)
+    /*
+    =============================================================================================================================
+        LOAD SAMPLESHEET
+    =============================================================================================================================
+    */
+
+    Channel
+        .fromPath(params.input)
         .splitCsv(header:true)
         .map{ tuple(it.taxa, it.segment, file(it.assembly, checkIfExists: true), it.length) }
-        .set{ manifest } 
+        .set{ manifest }
+
+    /*
+    =============================================================================================================================
+        QUALITY FILTER SEQUENCES
+    =============================================================================================================================
+    */
     
-    // MODULE: Filter low quality sequences
+    // MODULE: Filter low quality sequences & remove duplicates
     INPUT_QC(
         manifest
     )
 
-    //
+    /*
+    =============================================================================================================================
+        CLUSTER SEQUENCES 
+    =============================================================================================================================
+    */
     // MODULE: Run Mash
-    //
     MASH (
         INPUT_QC.out.assemblies
     )
     ch_versions = ch_versions.mix(MASH.out.versions.first())
 
-    // MODULE: CLUSTER
-    MASH.out.dist.filter{ taxa, segment, dist, count -> count.toInteger() <= 2000 }.set{ small_datasets }
-    MASH.out.dist.filter{ taxa, segment, dist, count -> count.toInteger() > 2000 }.set{ large_datasets }
+    // MODULE: Cluster sequences with cutree
+    // Small datasets
     CLUSTER (
-        small_datasets
+        MASH.out.dist.filter{ taxa, segment, dist, count -> count.toInteger() <= 2000 }
     )
-    CLUSTER_LARGE (
-        large_datasets
-    )
+    ch_versions = ch_versions.mix(CLUSTERS.out.versions.first())
 
+    // Large datasets - requires much more memory!
+    CLUSTER_LARGE (
+        MASH.out.dist.filter{ taxa, segment, dist, count -> count.toInteger() > 2000 }
+    )
+    ch_versions = ch_versions.mix(CLUSTERS_LARGE.out.versions.first())
+
+    // Combine small and large dataset cluster results and add clean sequence paths
     CLUSTER
         .out
         .results
@@ -111,12 +130,19 @@ workflow EPITOME {
         .map{ taxa, segment, cluster, contigs, seqs, count -> [ taxa, segment, cluster, contigs, seqs, contigs.size() ] }
         .set{ clusters }
 
-    // MODULE: SEQTK_SUBSEQ
+    // MODULE: Split clusters into multi-fasta files
     SEQTK_SUBSEQ(
         clusters
     )
+    ch_versions = ch_versions.mix(SEQTK_SUBSEQ.out.versions.first())
 
-    // MODULE: MAFFT
+    /*
+    =============================================================================================================================
+        ALIGN SEQUENCE CLUSTERS 
+    =============================================================================================================================
+    */
+
+    // MODULE: Align clustered sequences with mafft - only performed on clusters containing more than one sequence 
     MAFFT(
         SEQTK_SUBSEQ
             .out
@@ -124,7 +150,9 @@ workflow EPITOME {
             .filter{ taxa, segment, cluster, seqs, count -> count > 1 }
             .map{ taxa, segment, cluster, seqs, count -> [ taxa, segment, cluster, seqs ] }
     )
-    // recombine with singletons
+    ch_versions = ch_versions.mix(MAFFT.out.versions.first())
+
+    // recombine with singletons (i.e., clusters containing 1 sequence)
     SEQTK_SUBSEQ
         .out
         .sequences
@@ -132,31 +160,48 @@ workflow EPITOME {
         .map{ taxa, segment, cluster, seqs, count -> [ taxa, segment, cluster, seqs ] }
         .concat(MAFFT.out.fa)
         .set{ alignments }
-
+    
+    /*
+    =============================================================================================================================
+        CREATE CONSENSUS 
+    =============================================================================================================================
+    */
     // MODULE: Create consensus sequences
     CONSENSUS(
         alignments
     )
+    ch_versions = ch_versions.mix(CONSENSUS.out.versions.first())
 
-    // MODULE: Run blastn
+    /*
+    =============================================================================================================================
+        GATHER DATA ON CONSENSUS SEQUENCES
+    =============================================================================================================================
+    */
+    // MODULE: Determine average nucleotide identity between consensus sequences
     FASTANI_AVA (
         CONSENSUS.out.fa.groupTuple(by: [0,1]).map{ taxa, segment, cluster, assembly, length -> [ taxa, segment, assembly, length.min() ] }
     )
-
+    ch_versions = ch_versions.mix(FASTANI_AVA.out.versions.first())
+    // Classify consensus sequences based on supplied seed sequences - if supplied
     if(params.seeds){
         Channel
             .fromPath(params.seeds)
             .splitCsv(header:true)
             .map{ tuple(it.ref, file(it.assembly)) }
             .set{ seeds }
-        // MODULE: Run blastn
+        // MODULE: Determine average nucleotide identity between the consensus sequences and seed sequences
         FASTANI_SEEDS (
             CONSENSUS.out.fa.map{ taxa, segment, cluster, assembly, length -> assembly }.collect(),
             seeds.map{ ref, assembly -> assembly }.collect()
-        )
+        )    
+        ch_versions = ch_versions.mix(FASTANI_SEEDS.out.versions.first())
     }
 
-
+    /*
+    =============================================================================================================================
+        SUMMARIZE RESULTS
+    =============================================================================================================================
+    */
     // MODULE: Create summary
     SUMMARY(
         CLUSTER.out.results.concat(CLUSTER_LARGE.out.results).splitText().collectFile(name: "all-clusters.csv"),
@@ -165,34 +210,16 @@ workflow EPITOME {
         params.seeds ? FASTANI_SEEDS.out.ani : [],
         params.seeds ? file(params.seeds) : []
     )
+    ch_versions = ch_versions.mix(SUMMARY.out.versions.first())
+
+    /*
+    =============================================================================================================================
+        NEXTFLOW DEFAULTS
+    =============================================================================================================================
+    */
     CUSTOM_DUMPSOFTWAREVERSIONS (
         ch_versions.unique().collectFile(name: 'collated_versions.yml')
     )
-
-    /*
-    //
-    // MODULE: MultiQC
-    //
-    workflow_summary    = WorkflowRefmaker.paramsSummaryMultiqc(workflow, summary_params)
-    ch_workflow_summary = Channel.value(workflow_summary)
-
-    methods_description    = WorkflowRefmaker.methodsDescriptionText(workflow, ch_multiqc_custom_methods_description, params)
-    ch_methods_description = Channel.value(methods_description)
-
-    ch_multiqc_files = Channel.empty()
-    ch_multiqc_files = ch_multiqc_files.mix(ch_workflow_summary.collectFile(name: 'workflow_summary_mqc.yaml'))
-    ch_multiqc_files = ch_multiqc_files.mix(ch_methods_description.collectFile(name: 'methods_description_mqc.yaml'))
-    ch_multiqc_files = ch_multiqc_files.mix(CUSTOM_DUMPSOFTWAREVERSIONS.out.mqc_yml.collect())
-
-    MULTIQC (
-        ch_multiqc_files.collect(),
-        ch_multiqc_config.toList(),
-        ch_multiqc_custom_config.toList(),
-        ch_multiqc_logo.toList()
-    )
-    multiqc_report = MULTIQC.out.report.toList()
-
-    */
 }
 
 /*

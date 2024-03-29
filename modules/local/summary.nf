@@ -23,5 +23,10 @@ process SUMMARY {
     cat ${clusters} | grep -v 'seq,taxa,segment,cluster' > clusters-no-header.csv
     # run script
     summary.R clusters-no-header.csv ${lengths} ${ani_ava} ${ani_seeds} ${seeds}
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        summary: \$(summary.R version)
+    END_VERSIONS
     """
 }
