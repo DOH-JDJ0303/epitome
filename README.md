@@ -7,11 +7,11 @@ See the [wiki](https://github.com/DOH-JDJ0303/epitome/wiki) for more information
 # Quick Start
 ## Step 1. Create your samplesheet
 > Note: Nextflow requires absolute paths in samplesheets
-Create a samplesheet containing the taxa name, genome segment, path to a multi-fasta file of sequences for the taxa, and the expected sequence length (default within 15%).
+Create a samplesheet containing the taxa name, genome segment, path to a multi-fasta file of sequences for the taxa, and the expected sequence length (within 25%).
 `samplesheet.csv`:
 ```
 taxa,segment,assembly,length
-Influenza_A,HA,flu-a_HA_NCBI_2024-4-1.fasta,1710
+Influenza_A,HA,flu-a_HA_NCBI_2024-4-1.fasta,1950
 Influenza_A,NA,flu-a_NA_NCBI_2024-4-1.fasta,1400
 Measles,wg,measles_NCBI_2024-4-1.fasta,16000
 ```
