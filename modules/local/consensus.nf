@@ -24,9 +24,7 @@ process CONSENSUS {
     length=\$(cat ${prefix}.fa | grep -v '>' | tr -d '\n\t ' | wc -c)
     echo "${prefix},\${length}" > ${prefix}_length.csv
 
-    cat <<-END_VERSIONS > versions.yml
-        "${task.process}":
-            consensus: \$(consensus.sh version)
-        END_VERSIONS
+    # something about the normal way of getting version info messes with the creations of .command.env
+    echo "${task.process}:\n\tconsensus: \$(consensus.sh version | tr -d '\t\r\')" > versions.yml
     """
 }
