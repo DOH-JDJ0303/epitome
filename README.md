@@ -1,4 +1,4 @@
-# EPITOME: Enchanced Phylogenetic Inference Through Optimized Mapping Efficiency
+# EPITOME: Enhanced Phylogenetic Inference Through Optimized Mapping Efficiency
 
 EPITOME condenses a diverse set of DNA sequences (species-level or closer) into discrete, composite sequences that represent the overarching diversity of the dataset. In other words, EPITOME creates sequences that are the _epitome_ of the dataset diversity. This is accomplished by clustering the input based on pairwise genetic distances and then averaging the nucleotides at each genomic position (ties selected at random). When the genetic distance is based on read mapping efficiency, EPITOME can be used to create a set of reference genomes for consensus-based assembly pipelines, like [VAPER](https://github.com/DOH-JDJ0303/VAPER) or [viralrecon](https://github.com/nf-core/viralrecon).
 
