@@ -29,9 +29,7 @@ process INPUT_QC {
     # set sequence count
     seq_count=\$(cat ${prefix}-qc-summary.csv | cut -f 5 -d ',' | grep -v 'filter4' | tr -d '\t\r\n ')
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        input-qc: \$(input-qc.sh version)
-    END_VERSIONS
+    # something about the normal way of getting version info messes with the creations of .command.env
+    echo "${task.process}:\n\tinput-qc: \$(input-qc.sh version | tr -d '\t\r\')" > versions.yml
     """
 }
