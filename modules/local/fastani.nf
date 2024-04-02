@@ -34,9 +34,9 @@ process FASTANI_AVA {
         -o ${prefix}_ani.txt
 
     cat <<-END_VERSIONS > versions.yml
-        "${task.process}":
-            fastani: \$(fastANI --version 2>&1 | sed 's/version//;')
-        END_VERSIONS
+    "${task.process}":
+        fastani: \$(fastANI --version 2>&1 | sed 's/version//;')
+    END_VERSIONS
     """
 }
 
@@ -77,10 +77,10 @@ process FASTANI_SEEDS {
         --ql qfile.txt \\
         --rl rfile.txt \\
         -o seeds_ani.txt
-
+    
     cat <<-END_VERSIONS > versions.yml
-        "${task.process}":
-            fastani: \$(fastANI --version 2>&1 | sed 's/version//;')
-        END_VERSIONS
+    "${task.process}":
+        fastani: \$(fastANI --version 2>&1 | sed 's/version//;')
+    END_VERSIONS
     """
 }

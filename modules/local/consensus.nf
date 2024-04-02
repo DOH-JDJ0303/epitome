@@ -25,6 +25,6 @@ process CONSENSUS {
     echo "${prefix},\${length}" > ${prefix}_length.csv
 
     # something about the normal way of getting version info messes with the creations of .command.env
-    echo "${task.process}:\n\tconsensus: \$(consensus.sh version | tr -d '\t\r\')" > versions.yml
+    echo -e "\"${task.process}\":\n    consensus: \$(consensus.sh version)" > versions.yml
     """
 }

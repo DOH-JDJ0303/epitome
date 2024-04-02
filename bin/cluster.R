@@ -36,8 +36,16 @@ dist.mat <- read_tsv(dist_path, col_names = c("ID1","ID2","DIST","PVAL","HASHES"
   as.dist()
 
 #---- HIERARCHICAL CLUSTER ----#
-tree <- hclust(dist.mat, method = "complete")
-
+# create tree
+tree <- hclust(dist.mat, method = "average") %>%
+  as.phylo()
+# test that tree is ultrametric (required for cutree)
+if(! is.ultrametric(tree)){ 
+  cat("Error: Tree is not ultrameric!")
+  q()
+}
+# convert back to hclust for cutree
+tree <- as.hclust(tree)
 #---- CUT DENDROGRAM AT DISTANCE THRESHOLD ----#
 clusters <- cutree(tree, h = as.numeric(threshold)) %>%
   data.frame() %>%
@@ -49,14 +57,15 @@ clusters <- cutree(tree, h = as.numeric(threshold)) %>%
 
 # adjust height to percentage for more intuitive interpretation
 tree$height <- 100*tree$height
+x_scale <- seq(from = -max(round(tree$height+0.5, digits = 0)), to = 0, by = 10)
 
 # plot tree
 p <- ggtree(tree)%<+%clusters+
   geom_tippoint(aes(color = as.character(cluster)))+
   geom_vline(xintercept = -100*as.numeric(threshold), linetype = "dashed", color = "#E35335")+
   theme_tree2()+
-  labs(color = "Cluster", x = "Approx. Nucleotide Difference (%)")
-
+  labs(color = "Cluster", x = "Approx. Nucleotide Difference (%)")+
+  scale_x_continuous(breaks=x_scale, labels=abs(x_scale))
 #---- SAVE OUTPUTS ----#
 # cluster info
 write.csv(clusters, file = paste0(file.name,'.csv'), quote = F, row.names = F)
