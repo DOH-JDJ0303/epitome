@@ -105,13 +105,21 @@ fastani_ava <- fastani_ava %>%
   ungroup() %>%
   select(-taxa, -segment)
 
-#---- LOAD BLAST SEEDS RESULTS (IF SUPPLIED) ----#
+#---- JOIN FINAL DATASETS & SUMMARIZE ----#
+## WITHOUT SEEDS
+clusters %>%
+  full_join(fastani_ava, by = "seq") %>%
+  full_join(lengths, by = "seq") %>%
+  select(seq,taxa,segment,cluster,n,length,min_ani,max_ani) %>%
+  write.csv(file = "summary.csv", quote = F, row.names = F)
+
+## WITH SEEDS
 if(file.exists(fastani_seeds_file) & file.exists(seeds_file)){
   seeds <- read.csv(seeds_file) %>% 
     rename(seed = 1,
            ref = 2) %>%
     mutate(ref = basename_fa(ref))
-  fastani_ava <- read_tsv(fastani_seeds_file, col_names = c("query","ref","ani","mapped","total")) %>%
+  read_tsv(fastani_seeds_file, col_names = c("query","ref","ani","mapped","total")) %>%
     select(query, ref, ani) %>%
     mutate(query = basename_fa(query),
            ref = basename_fa(ref)) %>%
@@ -122,14 +130,8 @@ if(file.exists(fastani_seeds_file) & file.exists(seeds_file)){
     mutate(ani = round(ani, digits = 1)) %>%
     rename(seq = query,
            seed_ani = ani) %>%
-    full_join(fastani_ava, by = "seq") %>%
+    full_join(clusters, by = "seq") %>%
     left_join(seeds, by = "ref") %>%
-    select(seq, min_ani, max_ani, seed, seed_ani)
+    select(seq,taxa,segment,cluster,n,length,min_ani,max_ani, seed, seed_ani) %>%
+    write.csv(file = "summary.csv", quote = F, row.names = F)
 }
-
-#---- JOIN FINAL DATASETS & SUMMARIZE ----#
-clusters %>%
-  full_join(fastani_ava, by = "seq") %>%
-  full_join(lengths, by = "seq") %>%
-  select(seq,taxa,segment,cluster,n,length,min_ani,max_ani, seed, seed_ani) %>%
-  write.csv(file = "summary.csv", quote = F, row.names = F)

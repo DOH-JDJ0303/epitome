@@ -29,6 +29,6 @@ process SUMMARY {
     cat <<-END_VERSIONS > versions.yml
         "${task.process}":
             summary: \$(summary.R version)
-        END_VERSIONS
+    END_VERSIONS
     """
 }

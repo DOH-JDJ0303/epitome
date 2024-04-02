@@ -54,8 +54,8 @@ process CLUSTER_LARGE {
     cluster.R *.txt "${taxa}" "${segment}" ${params.dist_threshold}
     
     cat <<-END_VERSIONS > versions.yml
-        "${task.process}":
-            cluster: \$(cluster.R version)
-        END_VERSIONS
+    "${task.process}":
+        cluster: \$(cluster.sh version)
+    END_VERSIONS
     """
 }

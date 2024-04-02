@@ -110,13 +110,13 @@ workflow EPITOME {
     CLUSTER (
         MASH.out.dist.filter{ taxa, segment, dist, count -> count.toInteger() <= 2000 }
     )
-    ch_versions = ch_versions.mix(CLUSTER.out.versions.first())
+    //ch_versions = ch_versions.mix(CLUSTER.out.versions.first())
 
     // Large datasets - requires much more memory!
     CLUSTER_LARGE (
         MASH.out.dist.filter{ taxa, segment, dist, count -> count.toInteger() > 2000 }
     )
-    ch_versions = ch_versions.mix(CLUSTER_LARGE.out.versions.first())
+    //ch_versions = ch_versions.mix(CLUSTER_LARGE.out.versions.first())
 
     // Combine small and large dataset cluster results and add clean sequence paths
     CLUSTER
@@ -134,7 +134,7 @@ workflow EPITOME {
     SEQTK_SUBSEQ(
         clusters
     )
-    ch_versions = ch_versions.mix(SEQTK_SUBSEQ.out.versions.first())
+    //ch_versions = ch_versions.mix(SEQTK_SUBSEQ.out.versions.first())
 
     /*
     =============================================================================================================================
@@ -150,7 +150,7 @@ workflow EPITOME {
             .filter{ taxa, segment, cluster, seqs, count -> count > 1 }
             .map{ taxa, segment, cluster, seqs, count -> [ taxa, segment, cluster, seqs ] }
     )
-    ch_versions = ch_versions.mix(MAFFT.out.versions.first())
+    //ch_versions = ch_versions.mix(MAFFT.out.versions.first())
 
     // recombine with singletons (i.e., clusters containing 1 sequence)
     SEQTK_SUBSEQ
@@ -170,7 +170,7 @@ workflow EPITOME {
     CONSENSUS(
         alignments
     )
-    ch_versions = ch_versions.mix(CONSENSUS.out.versions.first())
+    //ch_versions = ch_versions.mix(CONSENSUS.out.versions.first())
 
     /*
     =============================================================================================================================
@@ -181,7 +181,7 @@ workflow EPITOME {
     FASTANI_AVA (
         CONSENSUS.out.fa.groupTuple(by: [0,1]).map{ taxa, segment, cluster, assembly, length -> [ taxa, segment, assembly, length.min() ] }
     )
-    ch_versions = ch_versions.mix(FASTANI_AVA.out.versions.first())
+    //ch_versions = ch_versions.mix(FASTANI_AVA.out.versions.first())
     // Classify consensus sequences based on supplied seed sequences - if supplied
     if(params.seeds){
         Channel
@@ -194,7 +194,7 @@ workflow EPITOME {
             CONSENSUS.out.fa.map{ taxa, segment, cluster, assembly, length -> assembly }.collect(),
             seeds.map{ ref, assembly -> assembly }.collect()
         )    
-        ch_versions = ch_versions.mix(FASTANI_SEEDS.out.versions.first())
+        //ch_versions = ch_versions.mix(FASTANI_SEEDS.out.versions.first())
     }
 
     /*
@@ -210,7 +210,7 @@ workflow EPITOME {
         params.seeds ? FASTANI_SEEDS.out.ani : [],
         params.seeds ? file(params.seeds) : []
     )
-    ch_versions = ch_versions.mix(SUMMARY.out.versions.first())
+    //ch_versions = ch_versions.mix(SUMMARY.out.versions.first())
 
     /*
     =============================================================================================================================
