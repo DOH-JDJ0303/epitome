@@ -10,6 +10,7 @@ from typing import List
 from Bio import SeqIO
 import math
 import numpy as np
+import concurrent.futures
 from concurrent.futures import ProcessPoolExecutor
 
 
@@ -21,6 +22,8 @@ parser.add_argument("--step", dest="dist_step",  required=True, type=float, help
 parser.add_argument("--rep", dest="replicates",  required=True, type=int, help="number of replicates")
 parser.add_argument("--outdir", dest="outdir",  help="output directory")
 parser.add_argument("--threads", dest="threads", type=int, help="number of threads", default=1)
+
+
 
 
 args = parser.parse_args() 
@@ -45,7 +48,7 @@ def num_point_mutations(filename:str, perc: float) -> int:
 def generate_outname(filename:str, replicate: int, ani: int, outdir:str) -> str:
     basename ='.'.join(filename.split(".")[:-1]).split("/")[-1]
     ext = "." + filename.split(".")[-1]
-    rename = basename + ".rep_" + str(replicate) + ".ani_" + str(ani) 
+    rename = basename + ".ani_" + str(ani) + ".rep_" + str(replicate)
     outname = rename + ext
     if outdir:
         outname = os.path.join(outdir,outname)
@@ -53,7 +56,7 @@ def generate_outname(filename:str, replicate: int, ani: int, outdir:str) -> str:
         outname = os.path.join("./",outname)
     return outname
 
-def generate_dataset(filename, replicate, ani, point_muts, outdir):#input_list): 
+def generate_dataset(filename, replicate, ani, point_muts, outdir) -> List:#input_list): 
             # filename = input_list[0]
             # replicate = input_list[1]
             # ani = input_list[2]
@@ -65,6 +68,14 @@ def generate_dataset(filename, replicate, ani, point_muts, outdir):#input_list):
                     -block 0 -codon 0 \
                     -outseq {outname}', shell=True)
             print(f"{outname} has been created")
+            return[filename, replicate, ani, point_muts, outname]
+
+
+def dataset_metadata(metadata: List):
+     df = pd.DataFrame(columns = ['reference_genome', 'rep_number', 'ani', 'point_mutations', 'output_filename'],
+                       data =  metadata)
+     df.to_csv("summary.csv", index=False)
+     print("summary.csv has been created successfully")
                 
 
 
@@ -75,6 +86,7 @@ if __name__ == "__main__":
         if not os.path.exists(outdir):
             os.makedirs(outdir)
     
+    out_table = []
     for filename in os.listdir(in_dir):
         filename = os.path.join(in_dir,filename) 
  
@@ -83,6 +95,16 @@ if __name__ == "__main__":
             point_muts = num_point_mutations(filename, ani_dist)
             exe = ProcessPoolExecutor(max_workers=threads)
             futures =[exe.submit(generate_dataset, filename, replicate, ani, point_muts, outdir) for replicate in range(replicates)]
+            for i in concurrent.futures.as_completed(futures):
+                 #print(type(i.result()))
+                 out_table.append(i.result())
+    
+    for i in out_table:
+         pass# print(i)
+
+
+    dataset_metadata(out_table, dist_min, dist_max, dist_step, replicates)
+    
                 
                 
 
