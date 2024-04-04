@@ -103,7 +103,7 @@ if __name__ == "__main__":
          pass# print(i)
 
 
-    dataset_metadata(out_table, dist_min, dist_max, dist_step, replicates)
+    dataset_metadata(out_table)
     
                 
                 
