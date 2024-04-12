@@ -28,8 +28,9 @@ library(ape)
 file.name <- paste(taxa_name,segment_name,sep="-")
 
 #---- LOAD PAIRWISE DISTANCES ----#
-dist.mat <- read_tsv(dist_path, col_names = c("ID1","ID2","DIST","PVAL","HASHES")) %>%
-  select(ID1, ID2, DIST) %>%
+dist.df <- read_tsv(dist_path, col_names = c("ID1","ID2","DIST","PVAL","HASHES")) %>%
+  select(ID1, ID2, DIST)
+dist.mat <- dist.df %>%
   pivot_wider(names_from="ID2", values_from="DIST") %>%
   column_to_rownames(var="ID1") %>%
   as.matrix() %>%
@@ -37,17 +38,20 @@ dist.mat <- read_tsv(dist_path, col_names = c("ID1","ID2","DIST","PVAL","HASHES"
 
 #---- HIERARCHICAL CLUSTER ----#
 # create tree
-tree <- hclust(dist.mat, method = "average") %>%
+tree <- hclust(dist.mat, method = "complete") %>%
   as.phylo()
-# test that tree is ultrametric (required for cutree)
+# test that tree is ultrametric and rooted (required for cutree)
 if(! is.ultrametric(tree)){ 
   cat("Error: Tree is not ultrameric!")
   q()
 }
-# convert back to hclust for cutree
-tree <- as.hclust(tree)
+if(! is.rooted(tree)){ 
+  cat("Error: Tree is not rooted!")
+  q()
+}
+
 #---- CUT DENDROGRAM AT DISTANCE THRESHOLD ----#
-clusters <- cutree(tree, h = as.numeric(threshold)) %>%
+clusters <- cutree(as.hclust(tree), h = as.numeric(threshold)) %>%
   data.frame() %>%
   rownames_to_column(var = "seq") %>%
   rename(cluster = 2) %>%
@@ -56,16 +60,36 @@ clusters <- cutree(tree, h = as.numeric(threshold)) %>%
   select(seq, taxa, segment, cluster)
 
 # adjust height to percentage for more intuitive interpretation
-tree$height <- 100*tree$height
-x_scale <- seq(from = -max(round(tree$height+0.5, digits = 0)), to = 0, by = 10)
+tree$edge.length <- 100*tree$edge.length
 
 # plot tree
 p <- ggtree(tree)%<+%clusters+
   geom_tippoint(aes(color = as.character(cluster)))+
-  geom_vline(xintercept = -100*as.numeric(threshold), linetype = "dashed", color = "#E35335")+
+  geom_vline(xintercept = 100*(1-as.numeric(threshold))/2, linetype = "dashed", color = "#E35335")+
   theme_tree2()+
-  labs(color = "Cluster", x = "Approx. Nucleotide Difference (%)")+
-  scale_x_continuous(breaks=x_scale, labels=abs(x_scale))
+  labs(color = "Cluster", x = "Estimated Nucleotide Difference (%)")+
+  xlim(0,50)
+
+#---- CHECK FOR DISCREPANCIES ----#
+join1 <- clusters %>%
+  select(seq,cluster) %>%
+  rename(ID1 = seq,
+         cluster1 = cluster)
+join2 <- clusters %>%
+  select(seq,cluster) %>%
+  rename(ID2 = seq,
+         cluster2 = cluster)
+discrep <- dist.df %>%
+  mutate(DIST = round(DIST, digits = 2)) %>%
+  left_join(join1, by = "ID1") %>%
+  left_join(join2, by = "ID2") %>%
+  filter(cluster1 == cluster2) %>%
+  filter(as.numeric(DIST) > as.numeric(threshold))
+if(nrow(discrep)){
+  cat("Error: The intra-cluster distance exceeds the supplied threshold", sep ="\n")
+  quit(status=1)
+}
+
 #---- SAVE OUTPUTS ----#
 # cluster info
 write.csv(clusters, file = paste0(file.name,'.csv'), quote = F, row.names = F)
