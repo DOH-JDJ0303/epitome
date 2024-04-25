@@ -87,7 +87,10 @@ plot_matrix <- function(ts){
   }else{
     dims <- 5
   }
-  ggsave(p, filename = paste0(ts,".jpg"), dpi = 300, height = dims, width = dims)
+  if(n>100){
+    ggsave(p, filename = paste0(ts,".jpg"), dpi = 300, height = dims, width = dims, limitsize = FALSE)
+  }else(cat("Matrix image not saved. Too many references!\n"))
+  
 }
 
 ts_list <- fastani_ava %>%
