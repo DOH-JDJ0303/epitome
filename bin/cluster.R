@@ -23,12 +23,14 @@ if(dist_path == "version"){
 library(tidyverse)
 library(ggtree)
 library(ape)
+install.packages("bigmemory")
+library(bigmemory)
 
 # set output file name
 file.name <- paste(taxa_name,segment_name,sep="-")
 
 #---- LOAD PAIRWISE DISTANCES ----#
-dist.df <- read_tsv(dist_path, col_names = c("ID1","ID2","DIST","PVAL","HASHES")) %>%
+dist.df <- read_tsv(dist_path, col_names = c("ID1","ID2","DIST")) %>%
   select(ID1, ID2, DIST)
 dist.mat <- dist.df %>%
   pivot_wider(names_from="ID2", values_from="DIST") %>%
@@ -55,7 +57,8 @@ clusters <- cutree(as.hclust(tree), h = as.numeric(threshold)) %>%
   data.frame() %>%
   rownames_to_column(var = "seq") %>%
   rename(cluster = 2) %>%
-  mutate(taxa = taxa_name,
+  mutate(seq = as.numeric(seq),
+         taxa = taxa_name,
          segment = segment_name) %>%
   select(seq, taxa, segment, cluster)
 

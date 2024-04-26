@@ -19,9 +19,9 @@ process CLUSTER {
     script:
     prefix = "${taxa}-${segment}"
     """
-    gzip -d ${dist}
+    zcat ${dist} | cut -f 1,2,3 > dists.txt
     # run script
-    cluster.R *.txt "${taxa}" "${segment}" ${params.dist_threshold}
+    cluster.R dists.txt "${taxa}" "${segment}" ${params.dist_threshold}
 
     cat <<-END_VERSIONS > versions.yml
         "${task.process}":
@@ -51,9 +51,9 @@ process CLUSTER_LARGE {
     script:
     prefix = "${taxa}-${segment}"
     """
-    gzip -d ${dist}
+    zcat ${dist} | cut -f 1,2,3 > dists.txt
     # run script
-    cluster.R *.txt "${taxa}" "${segment}" ${params.dist_threshold}
+    cluster.R dists.txt "${taxa}" "${segment}" ${params.dist_threshold}
     
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
