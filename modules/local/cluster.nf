@@ -35,7 +35,7 @@ process CLUSTER_LARGE {
     label "process_high_memory"
     container 'docker.io/johnjare/spree:1.0'
     errorStrategy 'retry'
-    maxRetries 4
+    maxRetries 3
 
     input:
     tuple val(taxa), val(segment), path(dist), val(seq_count)
