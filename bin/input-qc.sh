@@ -69,5 +69,5 @@ fi
 echo "total,filter1,filter2,filter3,filter4" > ${prefix}-qc-summary.csv
 echo "$(cat seqs | wc -l),$(cat f1 | wc -l),$(cat f2 | wc -l),$(cat f3 | wc -l),$(cat f4 | wc -l)" >> ${prefix}-qc-summary.csv
 # output cleaned sequences & clean up
-cat f3 | awk -v OFS='\n' -v prefix=${prefix} '{print ">"prefix"-"NR, $1}' > ${prefix}.clean.fa
+cat f3 | awk -v OFS='\n' -v prefix=${prefix} '{print ">"NR, $1}' > ${prefix}.clean.fa
 rm seqs f1 f2 f3 f4

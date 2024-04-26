@@ -1,6 +1,6 @@
 process MASH {
     tag "${taxa}-${segment}"
-    label 'process_medium'
+    label 'process_high'
     conda "bioconda::mash=2.3"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
         'https://depot.galaxyproject.org/singularity/mash:2.3--he348c14_1' :
