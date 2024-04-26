@@ -61,14 +61,16 @@ clusters <- cutree(as.hclust(tree), h = as.numeric(threshold)) %>%
 
 # adjust height to percentage for more intuitive interpretation
 tree$edge.length <- 100*tree$edge.length
+# get max edge length
+max_edge <- max(tree$edge.length)
 
 # plot tree
 p <- ggtree(tree)%<+%clusters+
   geom_tippoint(aes(color = as.character(cluster)))+
-  geom_vline(xintercept = 100*(1-as.numeric(threshold))/2, linetype = "dashed", color = "#E35335")+
+  geom_vline(xintercept = max_edge-100*as.numeric(threshold)/2, linetype = "dashed", color = "#E35335")+
   theme_tree2()+
   labs(color = "Cluster", x = "Estimated Nucleotide Difference (%)")+
-  xlim(0,50)
+  xlim(0,max_edge*1.1)
 
 #---- CHECK FOR DISCREPANCIES ----#
 join1 <- clusters %>%
@@ -98,13 +100,12 @@ n_iso <- p$data %>%
   nrow()
 
 # set image dimensions
-wdth <- n_iso/100
-if(wdth < 200){
-  wdth <- 10
+dim <- n_iso/200
+if(dim < 10){
+  dim <- 10
 }
-hght=n_iso/100
-if(hght < 200){
-  hght <- 10
+if(dim > 50){
+  dim <- 50
 }
 # plot
-ggsave(plot = p, filename = paste0(file.name,'.jpg'), dpi = 300, width = wdth, height = hght, limitsize=F)
+ggsave(plot = p, filename = paste0(file.name,'.jpg'), dpi = 300, width = dim, height = dim, limitsize=F)
