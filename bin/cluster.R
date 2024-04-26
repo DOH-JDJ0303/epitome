@@ -61,16 +61,22 @@ clusters <- cutree(as.hclust(tree), h = as.numeric(threshold)) %>%
 
 # adjust height to percentage for more intuitive interpretation
 tree$edge.length <- 100*tree$edge.length
-# get max edge length
-max_edge <- max(tree$edge.length)
+
+# get initial plot to determine the max tip length from root
+p <- ggtree(tree)
+x_max <- p$data %>%
+    filter(isTip) %>%
+    arrange(x) %>%
+    slice(1) %>%
+    .$x
 
 # plot tree
 p <- ggtree(tree)%<+%clusters+
   geom_tippoint(aes(color = as.character(cluster)))+
-  geom_vline(xintercept = max_edge-100*as.numeric(threshold)/2, linetype = "dashed", color = "#E35335")+
+  geom_vline(xintercept = x_max-(100*as.numeric(threshold)/2), linetype = "dashed", color = "#E35335")+
   theme_tree2()+
   labs(color = "Cluster", x = "Estimated Nucleotide Difference (%)")+
-  xlim(0,max_edge*1.1)
+  xlim(0,x_max*1.1)
 
 #---- CHECK FOR DISCREPANCIES ----#
 join1 <- clusters %>%
