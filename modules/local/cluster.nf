@@ -5,10 +5,11 @@ process CLUSTER {
     stageInMode 'copy'
 
     input:
-    tuple val(taxa), val(segment), path(dist), val(seq_count)
+    tuple val(taxa), val(segment), path(dist)
+    val iteration
 
     output:
-    path "*.csv",        emit: results
+    tuple val(taxa), val(segment), path("*.csv"), emit: results
     path "*.jpg",        emit: plot
     path "versions.yml", emit: versions
 
@@ -21,7 +22,7 @@ process CLUSTER {
     """
     zcat ${dist} | cut -f 1,2,3 > dists.txt
     # run script
-    cluster.R dists.txt "${taxa}" "${segment}" ${params.dist_threshold}
+    cluster.R dists.txt "${taxa}" "${segment}" "${iteration}" ${params.dist_threshold}
 
     cat <<-END_VERSIONS > versions.yml
         "${task.process}":

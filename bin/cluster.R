@@ -11,7 +11,8 @@ args <- commandArgs(trailingOnly = T)
 dist_path <- args[1]
 taxa_name <- args[2]
 segment_name <- args[3]
-threshold <- args[4]
+iteration <- args[4]
+threshold <- args[5]
 
 #---- VERSION ----#
 if(dist_path == "version"){
@@ -27,7 +28,7 @@ install.packages("bigmemory")
 library(bigmemory)
 
 # set output file name
-file.name <- paste(taxa_name,segment_name,sep="-")
+file.name <- paste(taxa_name,segment_name,iteration,sep="-")
 
 #---- LOAD PAIRWISE DISTANCES ----#
 dist.df <- read_tsv(dist_path, col_names = c("ID1","ID2","DIST")) %>%

@@ -31,16 +31,21 @@ ch_multiqc_custom_methods_description = params.multiqc_methods_description ? fil
     IMPORT LOCAL MODULES/SUBWORKFLOWS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
-include { INPUT_QC      } from '../modules/local/input-qc'
-include { MASH          } from '../modules/local/mash'
-include { CLUSTER       } from '../modules/local/cluster'
-include { CLUSTER_LARGE } from '../modules/local/cluster'
-include { SEQTK_SUBSEQ  } from '../modules/local/seqtk_subseq'
-include { MAFFT         } from '../modules/local/mafft'
-include { CONSENSUS     } from '../modules/local/consensus'
-include { FASTANI_AVA   } from '../modules/local/fastani'
-include { FASTANI_SEEDS } from '../modules/local/fastani'
-include { SUMMARY       } from '../modules/local/summary'
+include { INPUT_QC       } from '../modules/local/input-qc'
+include { MASH_TOP       } from '../modules/local/mash'
+include { CLUSTER        } from '../modules/local/cluster'
+include { MASH_REMAINDER } from '../modules/local/mash'
+include { ASSIGN_REMAINDER } from '../modules/local/assign-remainder'
+include { SEQTK_LOOSEENDS } from '../modules/local/seqtk_subseq'
+include { MASH_TOP as MASH_LOOSEENDS      } from '../modules/local/mash'
+include { CLUSTER as CLUSTER_LOOSEENDS    } from '../modules/local/cluster'
+include { BIND_CLUSTERS                   } from '../modules/local/bind-clusters.nf'
+include { SEQTK_SUBSEQ   } from '../modules/local/seqtk_subseq'
+include { MAFFT          } from '../modules/local/mafft'
+include { CONSENSUS      } from '../modules/local/consensus'
+include { FASTANI_AVA    } from '../modules/local/fastani'
+include { FASTANI_SEEDS  } from '../modules/local/fastani'
+include { SUMMARY        } from '../modules/local/summary'
 
 //
 // SUBWORKFLOW: Consisting of a mix of local and nf-core/modules
@@ -100,35 +105,63 @@ workflow EPITOME {
     =============================================================================================================================
     */
     // MODULE: Run Mash
-    MASH (
-        INPUT_QC.out.assemblies
+    MASH_TOP (
+        INPUT_QC.out.seqs.map{taxa, segment, top, remainder, remainder_count -> [ taxa, segment, top ]}
     )
-    ch_versions = ch_versions.mix(MASH.out.versions.first())
+    ch_versions = ch_versions.mix(MASH_TOP.out.versions.first())
 
     // MODULE: Cluster sequences with cutree
     // Small datasets
     CLUSTER (
-        MASH.out.dist.filter{ taxa, segment, dist, count -> count.toInteger() <= 2000 }
-    )
-    //ch_versions = ch_versions.mix(CLUSTER.out.versions.first())
-
-    // Large datasets - requires much more memory!
-    CLUSTER_LARGE (
-        MASH.out.dist.filter{ taxa, segment, dist, count -> count.toInteger() > 2000 }
+        MASH_TOP.out.dist,
+        "main"
     )
     //ch_versions = ch_versions.mix(CLUSTER_LARGE.out.versions.first())
+    MASH_REMAINDER (
+        INPUT_QC
+            .out
+            .seqs
+            .filter{ taxa, segment, top, remainder, remainder_count -> remainder_count.toInteger() > 0 }
+            .map{ taxa, segment, top, remainder, remainder_count -> [ taxa, segment, top, remainder ] }
+            .join(CLUSTER.out.results, by: [0,1])
+    )
 
-    // Combine small and large dataset cluster results and add clean sequence paths
-    CLUSTER
+    ASSIGN_REMAINDER (
+        MASH_REMAINDER.out.results
+    )
+
+    SEQTK_LOOSEENDS (
+        ASSIGN_REMAINDER
+            .out
+            .not_assigned
+            .filter{ taxa, segment, seq_list, count -> count.toInteger() > 0 }
+            .map{ taxa, segment, seq_list, count -> [ seq_list ] }
+            .join(INPUT_QC.out.seqs.map{taxa, segment, top, remainder, remainder_count -> [ taxa, segment, remainder ]}, by: [0,1])
+    )
+
+    MASH_LOOSEENDS (
+        SEQTK_LOOSEENDS.out.sequences
+    )
+
+    CLUSTER_LOOSEENDS (
+        MASH_LOOSEENDS.out.dist,
+        "looseends"
+    )
+
+    BIND_CLUSTERS (
+        CLUSTER.out.results.concat(ASSIGN_REMAINDER.out.assigned).concat(CLUSTER_LOOSEENDS.out.results).groupTuple(by: [0,1])
+    )
+
+    BIND_CLUSTERS
         .out
         .results
         .splitCsv(header: true)
-        .concat( CLUSTER_LARGE.out.results.splitCsv(header: true) )
         .map{ tuple(it.taxa, it.segment, it.cluster, it.seq) }
         .groupTuple(by: [0,1,2])
-        .combine(INPUT_QC.out.assemblies, by: [0,1])
-        .map{ taxa, segment, cluster, contigs, seqs, count -> [ taxa, segment, cluster, contigs, seqs, contigs.size() ] }
+        .combine(INPUT_QC.out.all, by: [0,1])
+        .map{ taxa, segment, cluster, contigs, seqs -> [ taxa, segment, cluster, contigs, seqs, contigs.size() ] }
         .set{ clusters }
+    
 
     // MODULE: Split clusters into multi-fasta files
     SEQTK_SUBSEQ(
@@ -204,7 +237,7 @@ workflow EPITOME {
     */
     // MODULE: Create summary
     SUMMARY(
-        CLUSTER.out.results.concat(CLUSTER_LARGE.out.results).splitText().collectFile(name: "all-clusters.csv"),
+        BIND_CLUSTERS.out.results.splitText().collectFile(name: "all-clusters.csv"),
         CONSENSUS.out.len.splitText().collectFile(name: "all-lengths.csv"),
         FASTANI_AVA.out.ani.splitText().collectFile(name: "all-ani.tsv"),
         params.seeds ? FASTANI_SEEDS.out.ani : [],
