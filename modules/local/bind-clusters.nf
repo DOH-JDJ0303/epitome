@@ -20,7 +20,7 @@ process BIND_CLUSTERS {
     if [ -f "${prefix}-looseends.csv " ]
     then
         max_n=\$(cat *main.csv | cut -f 4 -d ',' | sort -rn)
-        mv ${prefix}-looseends.csv tmp && cat tmp | grep -v "\$header" | tr ',' '\t' | awk -v max=\${max_n} -v OFS=',' '{print $1,$2,$3,$4+max}' > ${prefix}-looseends.csv
+        mv ${prefix}-looseends.csv tmp && cat tmp | grep -v "\$header" | tr ',' '\t' | awk -v max=\${max_n} -v OFS=',' '{print \$1,\$2,\$3,\$4+max}' > ${prefix}-looseends.csv
         rm tmp
     fi
     echo \$header > ${prefix}-clusters.csv

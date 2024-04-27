@@ -23,7 +23,7 @@ cat ${fasta} | sed 's/>.*$/@&@/g' | tr -d '\n' | tr '@' '\n' | grep -v '>' | tai
 cat seqs | sort | uniq > f1
 
 #---- FILTER 2: REMOVE SEQUENCES WITH AMBIGUOUS BASES ----#
-cat f1 | grep -vE 'R|Y|M|K|S|W|H|B|V|D|N' > f2
+cat f1 | grep -E '^[ATCG]+$' > f2
 if [ ! -s f2 ]
 then
     echo "Error: All sequences had ambiguous bases!" && exit 1
