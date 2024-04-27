@@ -5,7 +5,7 @@ process ASSIGN_REMAINDER {
     stageInMode 'copy'
 
     input:
-    tuple val(taxa), val(segment), path(reps), val(mash), val(all)
+    tuple val(taxa), val(segment), path(reps), path(mash), path(all)
 
     output:
     tuple val(taxa), val(segment), path("${prefix}-assigned.csv"), emit: assigned
