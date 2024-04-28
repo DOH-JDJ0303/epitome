@@ -140,7 +140,7 @@ workflow EPITOME {
         ASSIGN_REMAINDER
             .out
             .not_assigned
-            .filter{ taxa, segment, seq_list, count -> count.toInteger() > 0 }
+            .filter{ taxa, segment, seq_list, count -> count.toInteger() > 1 }
             .map{ taxa, segment, seq_list, count -> [ taxa, segment, seq_list ] }
             .join(INPUT_QC.out.seqs.map{ taxa, segment, top, remainder, remainder_count -> [ taxa, segment, remainder ] }, by: [0,1])
     )
