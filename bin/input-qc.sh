@@ -75,7 +75,7 @@ echo "$(cat seqs | wc -l),$(cat f1 | wc -l),$(cat f2 | wc -l),$(cat f3 | wc -l),
 cat f4 | shuf | awk -v OFS='\t' '{print ">"NR, $1}' > shufd
 ## get seq count
 n_clean=$(cat shufd | wc -l) 
-## parition sequences
+## parition sequences - this is necessary for large datasets
 cat shufd | sed -n "1,${max_cluster}p" | tr '\t' '\n' > ${prefix}.top.fa
 cat shufd | sed -n "$((max_cluster+1)),\$p" | tr '\t' '\n' > ${prefix}.remainder.fa
 # clean up

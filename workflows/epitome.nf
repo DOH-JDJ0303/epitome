@@ -101,22 +101,28 @@ workflow EPITOME {
 
     /*
     =============================================================================================================================
-        CLUSTER SEQUENCES 
+        CLUSTER SEQUENCES: ROUND 1
     =============================================================================================================================
     */
-    // MODULE: Run Mash
+    // MODULE: Determine pairwise Mash distances of sequence subset (number determined by `--max_clusters`; will include all if lower than the assigned threshold.)
     MASH_TOP (
         INPUT_QC.out.seqs.map{taxa, segment, top, remainder, remainder_count -> [ taxa, segment, top ]}
     )
     ch_versions = ch_versions.mix(MASH_TOP.out.versions.first())
 
-    // MODULE: Cluster sequences with cutree
-    // Small datasets
+    // MODULE: Cluster subset with hclust & cutree
     CLUSTER (
         MASH_TOP.out.dist,
         "main"
     )
     //ch_versions = ch_versions.mix(CLUSTER_LARGE.out.versions.first())
+
+    /*
+    =============================================================================================================================
+        CLUSTER SEQUENCES: ROUND 2
+    =============================================================================================================================
+    */
+    // MODULE: Run Mash on the remainder of sequences compared to representatives of each cluster identified in round 1
     MASH_REMAINDER (
         INPUT_QC
             .out
@@ -125,7 +131,7 @@ workflow EPITOME {
             .map{ taxa, segment, top, remainder, remainder_count -> [ taxa, segment, top, remainder ] }
             .join(CLUSTER.out.results, by: [0,1])
     )
-
+    // MODULE: Assign the remainder of sequences to a cluster
     ASSIGN_REMAINDER (
         MASH_REMAINDER.out.results
     )
@@ -135,8 +141,8 @@ workflow EPITOME {
             .out
             .not_assigned
             .filter{ taxa, segment, seq_list, count -> count.toInteger() > 0 }
-            .map{ taxa, segment, seq_list, count -> [ seq_list ] }
-            .join(INPUT_QC.out.seqs.map{taxa, segment, top, remainder, remainder_count -> [ taxa, segment, remainder ]}, by: [0,1])
+            .map{ taxa, segment, seq_list, count -> [ taxa, segment, seq_list ] }
+            .join(INPUT_QC.out.seqs.map{ taxa, segment, top, remainder, remainder_count -> [ taxa, segment, remainder ] }, by: [0,1])
     )
 
     MASH_LOOSEENDS (

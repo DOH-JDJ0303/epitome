@@ -58,7 +58,6 @@ process SEQTK_LOOSEENDS {
     def args   = task.ext.args   ?: ''
     prefix = "${taxa}-${segment}"
     """
-    echo "${contigs}" | tr -d '[],' | tr ' ' '\n' > contigs.txt
     seqtk \\
         subseq \\
         $args \\

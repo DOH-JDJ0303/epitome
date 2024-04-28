@@ -17,7 +17,9 @@ process ASSIGN_REMAINDER {
     script:
     prefix = "${taxa}-${segment}"
     """
+    # assign remainder
     assign-remainder.R ${reps} ${mash} ${all} ${taxa} ${segment}
+    # get count of sequences not assigned
     not_assigned_count=\$(cat not-assigned.csv | wc -l)
     """
 }
