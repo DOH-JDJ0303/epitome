@@ -36,27 +36,25 @@ then
     echo "Error: All sequences differ from the expected length: ${expected_length}!" && exit 1
 fi
 
-#---- FILTER 4: REMOVE OUTLIERS BASED ON LENGTH AND GC CONTENT ----#
-# function for filtering outliers based on sequence length and GC content
+#---- FILTER 4: REMOVE OUTLIERS BASED ON LENGTH ----#
+# function for filtering outliers based on sequence length
 filter_outliers () {
     # input
     local seqs=$1
     local out=$2
 
     # calculate sequence length & GC
-    cat $seqs | awk '{print $1, length($1)}' |  tr -d 'AT' | awk -v OFS='\t' '{print $2, 100*length($1)/$2}' > length_gc
+    cat $seqs | awk '{print $1, length($1)}' |  tr -d 'AT' | awk -v OFS='\t' '{print $2, 100*length($1)/$2}' > m_len
 
-    # calculate the mean and stdev of length and GC
-    mean_len=$(cat length_gc | awk '{ sum += $1; n++ } END { if (n > 0) print sum / n; }')
-    sd_len=$(cat length_gc | awk '{delta = $1 - avg; avg += delta / NR; mean2 += delta * ($1 - avg); } END { print sqrt(mean2 / NR); }')
-    mean_gc=$(cat length_gc | awk '{ sum += $2; n++ } END { if (n > 0) print sum / n; }')
-    sd_gc=$(cat length_gc | awk '{delta = $2 - avg; avg += delta / NR; mean2 += delta * ($2 - avg); } END { print sqrt(mean2 / NR); }')
+    # calculate the mean and stdev of length
+    mean_len=$(cat m_len | awk '{ sum += $1; n++ } END { if (n > 0) print sum / n; }')
+    sd_len=$(cat m_len | awk '{delta = $1 - avg; avg += delta / NR; mean2 += delta * ($1 - avg); } END { print sqrt(mean2 / NR); }')
 
-    # filter sequences based on length and GC content
-    paste seqs length_gc | awk -v ml=${mean_len} -v sl=${sd_len} -v mg=${mean_gc} -v sg=${sd_gc} '$2 >= ml-(3*sl) && $2 <= ml+(3*sl) && $3 >= mg-(3*sg) && $3 <= mg+(3*sg) {print $0}' > ${out}
+    # filter outliers
+    paste $seqs m_len | awk -v ml=${mean_len} -v sl=${sd_len} -v mg=${mean_gc} -v sg=${sd_gc} '$2 >= ml-(3*sl) || $2 <= ml+(3*sl) {print $0}' > ${out}
 
     # clean up
-    rm length_gc
+    rm m_len
 }
 
 # filter outliers
