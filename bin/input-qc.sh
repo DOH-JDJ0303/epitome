@@ -14,6 +14,7 @@ fasta=$1
 prefix=$2
 expected_length=$3
 length_threshold=$4
+max_cluster=$5
 
 # make each sequence a single line
 cat ${fasta} | sed 's/>.*$/@&@/g' | tr -d '\n' | tr '@' '\n' | grep -v '>' | tail -n +2 | awk '{print toupper($0)}' > seqs
@@ -22,7 +23,7 @@ cat ${fasta} | sed 's/>.*$/@&@/g' | tr -d '\n' | tr '@' '\n' | grep -v '>' | tai
 cat seqs | sort | uniq > f1
 
 #---- FILTER 2: REMOVE SEQUENCES WITH AMBIGUOUS BASES ----#
-cat f1 | grep -vE 'R|Y|M|K|S|W|H|B|V|D|N' > f2
+cat f1 | grep -E '^[ATCG]+$' > f2
 if [ ! -s f2 ]
 then
     echo "Error: All sequences had ambiguous bases!" && exit 1
@@ -66,6 +67,14 @@ fi
 # output summary of filtered samples
 echo "total,filter1,filter2,filter3,filter4" > ${prefix}-qc-summary.csv
 echo "$(cat seqs | wc -l),$(cat f1 | wc -l),$(cat f2 | wc -l),$(cat f3 | wc -l),$(cat f4 | wc -l)" >> ${prefix}-qc-summary.csv
-# output cleaned sequences & clean up
-cat f3 | awk -v OFS='\n' -v prefix=${prefix} '{print ">"NR, $1}' > ${prefix}.clean.fa
-rm seqs f1 f2 f3 f4
+
+# output sequences
+## shuffle and number sequences
+cat f4 | shuf | awk -v OFS='\t' '{print ">"NR, $1}' > shufd
+## get seq count
+n_clean=$(cat shufd | wc -l) 
+## parition sequences - this is necessary for large datasets
+cat shufd | sed -n "1,${max_cluster}p" | tr '\t' '\n' > ${prefix}.top.fa
+cat shufd | sed -n "$((max_cluster+1)),\$p" | tr '\t' '\n' > ${prefix}.remainder.fa
+# clean up
+rm seqs f1 f2 f3 f4 shufd
