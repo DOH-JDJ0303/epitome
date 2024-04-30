@@ -12,7 +12,7 @@ process SUMMARY {
 
     output:
     path "*.csv",        emit: summary
-    path "*.jpg",        emit: plots
+    path "*.jpg",        emit: plots, optional: true
     path "versions.yml", emit: versions
 
 
