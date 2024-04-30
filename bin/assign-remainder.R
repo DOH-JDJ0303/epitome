@@ -27,7 +27,7 @@ df.all <- read.csv(remainder_list_path,header=F) %>%
 #---- ASSIGN SEQS TO CLUSTERS ----#
 df.assigned <- df.mash %>%
   group_by(seq) %>%
-  filter(dist == max(dist)) %>%
+  filter(dist == min(dist)) %>%
   left_join(df.reps, by = "rep") %>%
   select(seq,cluster) %>%
   mutate(taxa = taxa_name,
