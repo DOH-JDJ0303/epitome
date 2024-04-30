@@ -245,7 +245,7 @@ workflow EPITOME {
     SUMMARY(
         BIND_CLUSTERS.out.results.splitText().collectFile(name: "all-clusters.csv"),
         CONSENSUS.out.len.splitText().collectFile(name: "all-lengths.csv"),
-        FASTANI_AVA.out.ani.splitText().collectFile(name: "all-ani.tsv"),
+        FASTANI_AVA.out.ani.map{ taxa, segment, ani -> ani }.splitText().collectFile(name: "all-ani.tsv"),
         params.seeds ? FASTANI_SEEDS.out.ani : [],
         params.seeds ? file(params.seeds) : []
     )
