@@ -7,7 +7,7 @@ process BIND_CLUSTERS {
     tuple val(taxa), val(segment), path(clusters)
 
     output:
-    path "*.csv",        emit: results
+    tuple val(taxa), val(segment), path("*.csv"), emit: results
 
 
     when:

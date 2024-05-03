@@ -7,9 +7,8 @@ process CONSENSUS {
     tuple val(taxa), val(segment), val(cluster), path(aln)
 
     output:
-    tuple val(taxa), val(segment), val(cluster), path("${prefix}.fa"), env(length), emit: fa
-    path "${prefix}_length.csv",                                                    emit: len
-    path "versions.yml",                                                            emit: versions
+    tuple val(taxa), val(segment), path("${prefix}.fa"), emit: fa
+    path "versions.yml",                                 emit: versions
 
     when:
     task.ext.when == null || task.ext.when

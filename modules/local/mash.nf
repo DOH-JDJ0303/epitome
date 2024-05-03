@@ -21,13 +21,14 @@ process MASH_TOP {
     prefix = "${taxa}-${segment}"
 
     """
+    cat ${sequences} > seqs.fa
     # create mash sketch
     mash \\
         sketch \\
         $args \\
         -p $task.cpus \\
         -o sketch \\
-        -i ${sequences}
+        -i seqs.fa
 
     # calculate distance
     mash \\

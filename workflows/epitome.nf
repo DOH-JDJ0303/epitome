@@ -31,21 +31,23 @@ ch_multiqc_custom_methods_description = params.multiqc_methods_description ? fil
     IMPORT LOCAL MODULES/SUBWORKFLOWS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
-include { INPUT_QC       } from '../modules/local/input-qc'
-include { MASH_TOP       } from '../modules/local/mash'
-include { CLUSTER        } from '../modules/local/cluster'
-include { MASH_REMAINDER } from '../modules/local/mash'
-include { ASSIGN_REMAINDER } from '../modules/local/assign-remainder'
-include { SEQTK_LOOSEENDS } from '../modules/local/seqtk_subseq'
-include { MASH_TOP as MASH_LOOSEENDS      } from '../modules/local/mash'
-include { CLUSTER as CLUSTER_LOOSEENDS    } from '../modules/local/cluster'
-include { BIND_CLUSTERS                   } from '../modules/local/bind-clusters.nf'
-include { SEQTK_SUBSEQ   } from '../modules/local/seqtk_subseq'
-include { MAFFT          } from '../modules/local/mafft'
-include { CONSENSUS      } from '../modules/local/consensus'
-include { FASTANI_AVA    } from '../modules/local/fastani'
-include { FASTANI_SEEDS  } from '../modules/local/fastani'
-include { SUMMARY        } from '../modules/local/summary'
+include { INPUT_QC                     } from '../modules/local/input-qc'
+include { MASH_TOP                     } from '../modules/local/mash'
+include { CLUSTER                      } from '../modules/local/cluster'
+include { MASH_REMAINDER               } from '../modules/local/mash'
+include { ASSIGN_REMAINDER             } from '../modules/local/assign-remainder'
+include { SEQTK_LOOSEENDS              } from '../modules/local/seqtk_subseq'
+include { MASH_TOP as MASH_LOOSEENDS   } from '../modules/local/mash'
+include { CLUSTER as CLUSTER_LOOSEENDS } from '../modules/local/cluster'
+include { BIND_CLUSTERS                } from '../modules/local/bind-clusters.nf'
+include { SEQTK_SUBSEQ                 } from '../modules/local/seqtk_subseq'
+include { MAFFT                        } from '../modules/local/mafft'
+include { CONSENSUS                    } from '../modules/local/consensus'
+include { MASH_TOP as MASH_CONDENSE    } from '../modules/local/mash'
+include { CONDENSE                     } from '../modules/local/condense'
+include { FASTANI_AVA                  } from '../modules/local/fastani'
+include { FASTANI_SEEDS                } from '../modules/local/fastani'
+include { SUMMARY                      } from '../modules/local/summary'
 
 //
 // SUBWORKFLOW: Consisting of a mix of local and nf-core/modules
@@ -101,7 +103,7 @@ workflow EPITOME {
 
     /*
     =============================================================================================================================
-        CLUSTER SEQUENCES: ROUND 1
+        CLUSTER SEQUENCES: CLUSTER SUBSET
     =============================================================================================================================
     */
     // MODULE: Determine pairwise Mash distances of sequence subset (number determined by `--max_clusters`; will include all if lower than the assigned threshold.)
@@ -119,7 +121,7 @@ workflow EPITOME {
 
     /*
     =============================================================================================================================
-        CLUSTER SEQUENCES: ROUND 2
+        CLUSTER SEQUENCES: ASSIGN REMAINING USING SUBSET CLASSIFIER
     =============================================================================================================================
     */
     // MODULE: Run Mash on the remainder of sequences compared to representatives of each cluster identified in round 1
@@ -136,6 +138,11 @@ workflow EPITOME {
         MASH_REMAINDER.out.results
     )
 
+    /*
+    =============================================================================================================================
+        CLUSTER SEQUENCES: CLUSTER LOOSE-ENDS
+    =============================================================================================================================
+    */
     SEQTK_LOOSEENDS (
         ASSIGN_REMAINDER
             .out
@@ -145,15 +152,23 @@ workflow EPITOME {
             .join(INPUT_QC.out.seqs.map{ taxa, segment, top, remainder, remainder_count -> [ taxa, segment, remainder ] }, by: [0,1])
     )
 
+    // MODULE: Determine pairwise Mash distances of loose-ends.
     MASH_LOOSEENDS (
         SEQTK_LOOSEENDS.out.sequences
     )
 
+    // MODULE: Cluster loose-ends with hclust & cutree
     CLUSTER_LOOSEENDS (
         MASH_LOOSEENDS.out.dist,
         "looseends"
     )
 
+    /*
+    =============================================================================================================================
+        CLUSTER SEQUENCES: COMBINE ALL CLUSTERS
+    =============================================================================================================================
+    */
+    // MODULE: Combine all cluster channels. Loose-end clusters are adjusted based on largest subset cluster.
     BIND_CLUSTERS (
         CLUSTER.out.results.concat(ASSIGN_REMAINDER.out.assigned).concat(CLUSTER_LOOSEENDS.out.results).groupTuple(by: [0,1])
     )
@@ -161,6 +176,7 @@ workflow EPITOME {
     BIND_CLUSTERS
         .out
         .results
+        .map{ taxa, segment, result -> result }
         .splitCsv(header: true)
         .map{ tuple(it.taxa, it.segment, it.cluster, it.seq) }
         .groupTuple(by: [0,1,2])
@@ -180,7 +196,6 @@ workflow EPITOME {
         ALIGN SEQUENCE CLUSTERS 
     =============================================================================================================================
     */
-
     // MODULE: Align clustered sequences with mafft - only performed on clusters containing more than one sequence 
     MAFFT(
         SEQTK_SUBSEQ
@@ -211,14 +226,32 @@ workflow EPITOME {
     )
     //ch_versions = ch_versions.mix(CONSENSUS.out.versions.first())
 
+    CONSENSUS.out.fa.groupTuple(by: [0,1]).set{ ch_consensus }
+
     /*
     =============================================================================================================================
-        GATHER DATA ON CONSENSUS SEQUENCES
+        CONDENSE CONSENSUS SEQS
+    =============================================================================================================================
+    */
+
+    // MODULE: Determine pairwise Mash distances of consensus sequences.
+    MASH_CONDENSE (
+        ch_consensus
+    )
+
+    // MODULE: Condense sequences that share sequence identity below `--dist_threshold`
+    CONDENSE (
+        MASH_CONDENSE.out.dist.join(ch_consensus, by: [0,1]).join(BIND_CLUSTERS.out.results, by: [0,1])
+    )
+
+    /*
+    =============================================================================================================================
+        GATHER DATA ON FINAL SEQUENCES
     =============================================================================================================================
     */
     // MODULE: Determine average nucleotide identity between consensus sequences
     FASTANI_AVA (
-        CONSENSUS.out.fa.groupTuple(by: [0,1]).map{ taxa, segment, cluster, assembly, length -> [ taxa, segment, assembly, length.min() ] }
+        CONDENSE.out.results.map{ taxa, segment, summary, consensus, length -> [ taxa, segment, consensus, length ] }
     )
     //ch_versions = ch_versions.mix(FASTANI_AVA.out.versions.first())
     // Classify consensus sequences based on supplied seed sequences - if supplied
@@ -230,7 +263,7 @@ workflow EPITOME {
             .set{ seeds }
         // MODULE: Determine average nucleotide identity between the consensus sequences and seed sequences
         FASTANI_SEEDS (
-            CONSENSUS.out.fa.map{ taxa, segment, cluster, assembly, length -> assembly }.collect(),
+            CONDENSE.results.map{ taxa, segment, summary, assembly, length -> assembly }.collect(),
             seeds.map{ ref, assembly -> assembly }.collect()
         )    
         //ch_versions = ch_versions.mix(FASTANI_SEEDS.out.versions.first())
@@ -243,8 +276,7 @@ workflow EPITOME {
     */
     // MODULE: Create summary
     SUMMARY(
-        BIND_CLUSTERS.out.results.splitText().collectFile(name: "all-clusters.csv"),
-        CONSENSUS.out.len.splitText().collectFile(name: "all-lengths.csv"),
+        CONDENSE.out.results.map{taxa, segment, summary, assembly, length -> summary}.splitText(keepHeader: true).collectFile(name: 'all-summaries.csv'),
         FASTANI_AVA.out.ani.map{ taxa, segment, ani -> ani }.splitText().collectFile(name: "all-ani.tsv"),
         params.seeds ? FASTANI_SEEDS.out.ani : [],
         params.seeds ? file(params.seeds) : []

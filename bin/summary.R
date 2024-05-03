@@ -6,14 +6,13 @@ version <- "1.0"
 
 #---- ARGUMENTS ----#
 args <- commandArgs(trailingOnly = T)
-clusters_file <- args[1]
-lengths_file <- args[2]
-fastani_ava_file <- args[3]
-fastani_seeds_file <- args[4]
-seeds_file <- args[5]
+summary_file <- args[1]
+fastani_ava_file <- args[2]
+fastani_seeds_file <- args[3]
+seeds_file <- args[4]
 
 #---- VERSION ----#
-if(clusters_file == "version"){
+if(summary_file == "version"){
   cat(version, sep = "\n")
   quit(status=0)
 }
@@ -29,17 +28,12 @@ basename_fa <- function(path){
     
 }
 
-#---- LOAD & JOIN CLUSTER & LENGTH DATA ---- #
-clusters <- read.csv(clusters_file, header = F, col.names = c("seq","taxa","segment","cluster")) %>%
-  group_by(taxa, segment, cluster) %>%
-  count() %>%
-  ungroup() %>%
-  mutate(seq = paste(taxa,segment,cluster,sep="-")) %>%
-  select(seq, taxa, segment, cluster, n)
-
-lengths <- read.csv(lengths_file, header = F, col.names = c("seq","length"))
-
-cluster_lengths <- full_join(clusters, lengths, by = "seq")
+#---- LOAD SUMMARIES ---- #
+clusters <- read.csv(summary_file, header = F, col.names = c("seq","taxa","segment","cluster","n","n2","length")) %>%
+  mutate(condensed = case_when(n2 > 1 ~ TRUE,
+                               n2 == 1 ~ FALSE)
+                               ) %>%
+  select(-n2)
 
 #---- LOAD FASTANI AVA RESULTS & ADD MISSING ----#
 fastani_ava <- read_tsv(fastani_ava_file, col_names = c("query","ref","ani","mapped","total")) %>%
@@ -47,15 +41,15 @@ fastani_ava <- read_tsv(fastani_ava_file, col_names = c("query","ref","ani","map
   mutate(query = basename_fa(query),
          ref = basename_fa(ref))
 # get list of pairwise comparisons, add back to fastani_ava, filter by taxa & segment, then calculate ID
-q_filt <- cluster_lengths %>%
+q_filt <- clusters %>%
   select(seq, taxa, segment, length) %>%
   rename(query = seq)
-r_filt <- cluster_lengths %>%
+r_filt <- clusters %>%
   mutate(ref = seq,
          staxa=taxa,
          sseg=segment) %>%
   select(ref, staxa, sseg)
-fastani_ava <- cluster_lengths %>%
+fastani_ava <- clusters %>%
   select(seq) %>%
   mutate(query=seq,
          tmp='this works') %>%
@@ -87,7 +81,7 @@ plot_matrix <- function(ts){
   }else{
     dims <- 5
   }
-  if(n>100){
+  if(n<100){
     ggsave(p, filename = paste0(ts,".jpg"), dpi = 300, height = dims, width = dims, limitsize = FALSE)
   }else(cat("Matrix image not saved. Too many references!\n"))
   
@@ -112,9 +106,8 @@ fastani_ava <- fastani_ava %>%
 ## WITHOUT SEEDS
 clusters %>%
   full_join(fastani_ava, by = "seq") %>%
-  full_join(lengths, by = "seq") %>%
-  select(seq,taxa,segment,cluster,n,length,min_ani,max_ani) %>%
-  write.csv(file = "summary.csv", quote = F, row.names = F)
+  select(seq,taxa,segment,cluster,n,condensed,length,min_ani,max_ani) %>%
+  write.csv(file = paste0(format(Sys.Date(), "%s"),"-epitome.csv"), quote = F, row.names = F)
 
 ## WITH SEEDS
 if(file.exists(fastani_seeds_file) & file.exists(seeds_file)){
@@ -136,5 +129,5 @@ if(file.exists(fastani_seeds_file) & file.exists(seeds_file)){
     full_join(clusters, by = "seq") %>%
     left_join(seeds, by = "ref") %>%
     select(seq,taxa,segment,cluster,n,length,min_ani,max_ani, seed, seed_ani) %>%
-    write.csv(file = "summary.csv", quote = F, row.names = F)
+    write.csv(file = paste0(format(Sys.Date(), "%s"),"-epitome.csv"), quote = F, row.names = F)
 }

@@ -24,8 +24,6 @@ if(dist_path == "version"){
 library(tidyverse)
 library(ggtree)
 library(ape)
-install.packages("bigmemory")
-library(bigmemory)
 
 # set output file name
 file.name <- paste(taxa_name,segment_name,iteration,sep="-")
