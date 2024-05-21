@@ -1,13 +1,13 @@
 process BIND_CLUSTERS {
     tag "${prefix}"
     label "process_low"
-    container 'docker.io/johnjare/spree:1.0'
 
     input:
     tuple val(taxa), val(segment), path(clusters)
 
     output:
     tuple val(taxa), val(segment), path("*.csv"), emit: results
+    path "versions.yml",                          emit: versions
 
 
     when:
@@ -28,5 +28,11 @@ process BIND_CLUSTERS {
     # create combined file
     echo \$header > ${prefix}-clusters.csv
     cat ${clusters} | grep -v "\$header" >> ${prefix}-clusters.csv
+
+    # version
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        bind-clusters: 1.0
+    END_VERSIONS
     """
 }

@@ -33,10 +33,8 @@ process FASTANI_AVA {
         --rl seqs.txt \\
         -o ${prefix}_ani.txt
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        fastani: \$(fastANI --version 2>&1 | sed 's/version//;')
-    END_VERSIONS
+    # odd stuff going on with versioning
+    echo -e "\\"${task.process}\\":\\n    fastani: \$(fastANI --version 2>&1 | sed 's/version//;')" > versions.yml
     """
 }
 

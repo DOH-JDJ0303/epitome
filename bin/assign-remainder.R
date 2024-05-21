@@ -1,4 +1,8 @@
 #!/usr/bin/env Rscript
+version <- "1.0"
+
+# assign-remainder.R
+# Author: Jared Johnson, jared.johnson@doh.wa.gov
 
 library(tidyverse)
 
@@ -9,6 +13,12 @@ remainder_mash_path <- args[2]
 remainder_list_path <- args[3]
 taxa_name <- args[4]
 segment_name <- args[5]
+
+#---- VERSION ----#
+if(reps_path == "version"){
+  cat(version, sep = "\n")
+  quit(status=0)
+}
 
 # set output file name
 file.name <- paste(taxa_name,segment_name,"assigned",sep="-")

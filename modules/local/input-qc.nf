@@ -1,7 +1,6 @@
 process INPUT_QC {
     tag "${prefix}"
     label 'process_low'
-    container 'docker.io/jdj0303/bigbacter-base:1.0.0'
     stageInMode 'copy'
 
     input:
@@ -9,8 +8,10 @@ process INPUT_QC {
 
     output:
     tuple val(taxa), val(segment), path("${prefix}.top.fa"), path("${prefix}.remainder.fa"), env(remainder_count), emit: seqs
-    tuple val(taxa), val(segment), path("${prefix}.all.fa"), emit: all
-    path "${prefix}-qc-summary.csv", emit: summary
+    tuple val(taxa), val(segment), path("${prefix}.all.fa"),                                                       emit: all
+    path "${prefix}-qc-summary.csv",                                                                               emit: summary
+    path "versions.yml",                                                                                           emit: versions
+
 
     when:
     task.ext.when == null || task.ext.when
@@ -34,6 +35,6 @@ process INPUT_QC {
     remainder_count=\$(cat ${prefix}.remainder.fa | paste - - | wc -l)
 
     # something about the normal way of getting version info messes with the creations of .command.env
-    echo -e "\"${task.process}\":\n    input-qc: \$(input-qc.sh version)" > versions.yml
+    echo -e "\\"${task.process}\\":\\n    input-qc.sh: \$(input-qc.sh version)" > versions.yml
     """
 }

@@ -10,6 +10,7 @@ summary_file <- args[1]
 fastani_ava_file <- args[2]
 fastani_seeds_file <- args[3]
 seeds_file <- args[4]
+timestamp <- args[5]
 
 #---- VERSION ----#
 if(summary_file == "version"){
@@ -23,7 +24,7 @@ library(tidyverse)
 #---- FUNCTIONS ----#
 basename_fa <- function(path){
     result <- basename(path) %>%
-      str_remove_all(pattern = ".fa$")
+      str_remove_all(pattern = ".fa.gz$")
     return(result)
     
 }
@@ -98,6 +99,10 @@ fastani_ava <- fastani_ava %>%
   filter(query != ref) %>%
   group_by(query, taxa, segment) %>%
   summarise(min_ani = round(min(ani), digits = 1), max_ani = round(max(ani), digits = 1)) %>%
+  mutate(min_ani = case_when(min_ani < 80 ~ '< 80',
+                             TRUE ~ as.character(min_ani)),
+         max_ani = case_when(max_ani < 80 ~ '< 80',
+                             TRUE ~ as.character(max_ani))) %>%
   rename(seq = query) %>%
   ungroup() %>%
   select(-taxa, -segment)
@@ -107,7 +112,7 @@ fastani_ava <- fastani_ava %>%
 clusters %>%
   full_join(fastani_ava, by = "seq") %>%
   select(seq,taxa,segment,cluster,n,condensed,length,min_ani,max_ani) %>%
-  write.csv(file = paste0(format(Sys.Date(), "%s"),"-epitome.csv"), quote = F, row.names = F)
+  write.csv(file = paste0(timestamp,"-summary.csv"), quote = F, row.names = F)
 
 ## WITH SEEDS
 if(file.exists(fastani_seeds_file) & file.exists(seeds_file)){
@@ -129,5 +134,5 @@ if(file.exists(fastani_seeds_file) & file.exists(seeds_file)){
     full_join(clusters, by = "seq") %>%
     left_join(seeds, by = "ref") %>%
     select(seq,taxa,segment,cluster,n,length,min_ani,max_ani, seed, seed_ani) %>%
-    write.csv(file = paste0(format(Sys.Date(), "%s"),"-epitome.csv"), quote = F, row.names = F)
+    write.csv(file = paste0(timestamp,"-summary.csv"), quote = F, row.names = F)
 }

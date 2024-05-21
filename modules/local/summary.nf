@@ -1,12 +1,12 @@
 process SUMMARY {
     label 'process_low'
-    container 'docker.io/johnjare/spree:1.0'
 
     input:
     path summary
     path ani_ava
     path ani_seeds
     path seeds
+    val timestamp
 
 
     output:
@@ -21,11 +21,11 @@ process SUMMARY {
     script:
     """
     # run script
-    summary.R ${summary} ${ani_ava} ${ani_seeds} ${seeds}
+    summary.R "${summary}" "${ani_ava}" "${ani_seeds}" "${seeds}" "${timestamp}"
 
     cat <<-END_VERSIONS > versions.yml
-        "${task.process}":
-            summary: \$(summary.R version)
+    "${task.process}":
+        summary: \$(summary.R version)
     END_VERSIONS
     """
 }

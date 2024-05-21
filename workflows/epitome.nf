@@ -31,6 +31,7 @@ ch_multiqc_custom_methods_description = params.multiqc_methods_description ? fil
     IMPORT LOCAL MODULES/SUBWORKFLOWS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
+include { TIMESTAMP                    } from '../modules/local/timestamp'
 include { INPUT_QC                     } from '../modules/local/input-qc'
 include { MASH_TOP                     } from '../modules/local/mash'
 include { CLUSTER                      } from '../modules/local/cluster'
@@ -47,7 +48,9 @@ include { MASH_TOP as MASH_CONDENSE    } from '../modules/local/mash'
 include { CONDENSE                     } from '../modules/local/condense'
 include { FASTANI_AVA                  } from '../modules/local/fastani'
 include { FASTANI_SEEDS                } from '../modules/local/fastani'
-include { SUMMARY                      } from '../modules/local/summary'
+include { SUMMARY                      } from '../modules/local/summary'    
+include { EXPORT                       } from '../modules/local/export'    
+
 
 //
 // SUBWORKFLOW: Consisting of a mix of local and nf-core/modules
@@ -80,10 +83,16 @@ workflow EPITOME {
 
     /*
     =============================================================================================================================
-        LOAD SAMPLESHEET
+        LOAD SAMPLESHEET & GET TIMESTAMP
     =============================================================================================================================
     */
 
+    // MODULE: Get timestamp
+    TIMESTAMP ()
+        .timestamp
+        .set{ch_timestamp}
+
+    // Load samplesheet
     Channel
         .fromPath(params.input)
         .splitCsv(header:true)
@@ -100,6 +109,8 @@ workflow EPITOME {
     INPUT_QC(
         manifest
     )
+    ch_versions = ch_versions.mix(INPUT_QC.out.versions.first())
+
 
     /*
     =============================================================================================================================
@@ -117,7 +128,7 @@ workflow EPITOME {
         MASH_TOP.out.dist,
         "main"
     )
-    //ch_versions = ch_versions.mix(CLUSTER_LARGE.out.versions.first())
+    ch_versions = ch_versions.mix(CLUSTER.out.versions.first())
 
     /*
     =============================================================================================================================
@@ -137,6 +148,7 @@ workflow EPITOME {
     ASSIGN_REMAINDER (
         MASH_REMAINDER.out.results
     )
+    ch_versions = ch_versions.mix(CLUSTER.out.versions.first())
 
     /*
     =============================================================================================================================
@@ -151,17 +163,20 @@ workflow EPITOME {
             .map{ taxa, segment, seq_list, count -> [ taxa, segment, seq_list ] }
             .join(INPUT_QC.out.seqs.map{ taxa, segment, top, remainder, remainder_count -> [ taxa, segment, remainder ] }, by: [0,1])
     )
+    ch_versions = ch_versions.mix(SEQTK_LOOSEENDS.out.versions.first())
 
     // MODULE: Determine pairwise Mash distances of loose-ends.
     MASH_LOOSEENDS (
         SEQTK_LOOSEENDS.out.sequences
     )
+    ch_versions = ch_versions.mix(MASH_LOOSEENDS.out.versions.first())
 
     // MODULE: Cluster loose-ends with hclust & cutree
     CLUSTER_LOOSEENDS (
         MASH_LOOSEENDS.out.dist,
         "looseends"
     )
+    ch_versions = ch_versions.mix(CLUSTER_LOOSEENDS.out.versions.first())
 
     /*
     =============================================================================================================================
@@ -172,6 +187,7 @@ workflow EPITOME {
     BIND_CLUSTERS (
         CLUSTER.out.results.concat(ASSIGN_REMAINDER.out.assigned).concat(CLUSTER_LOOSEENDS.out.results).groupTuple(by: [0,1])
     )
+    ch_versions = ch_versions.mix(BIND_CLUSTERS.out.versions.first())
 
     BIND_CLUSTERS
         .out
@@ -189,7 +205,7 @@ workflow EPITOME {
     SEQTK_SUBSEQ(
         clusters
     )
-    //ch_versions = ch_versions.mix(SEQTK_SUBSEQ.out.versions.first())
+    ch_versions = ch_versions.mix(SEQTK_SUBSEQ.out.versions.first())
 
     /*
     =============================================================================================================================
@@ -204,7 +220,7 @@ workflow EPITOME {
             .filter{ taxa, segment, cluster, seqs, count -> count > 1 }
             .map{ taxa, segment, cluster, seqs, count -> [ taxa, segment, cluster, seqs ] }
     )
-    //ch_versions = ch_versions.mix(MAFFT.out.versions.first())
+    ch_versions = ch_versions.mix(MAFFT.out.versions.first())
 
     // recombine with singletons (i.e., clusters containing 1 sequence)
     SEQTK_SUBSEQ
@@ -224,7 +240,7 @@ workflow EPITOME {
     CONSENSUS(
         alignments
     )
-    //ch_versions = ch_versions.mix(CONSENSUS.out.versions.first())
+    ch_versions = ch_versions.mix(CONSENSUS.out.versions.first())
 
     CONSENSUS.out.fa.groupTuple(by: [0,1]).set{ ch_consensus }
 
@@ -233,16 +249,17 @@ workflow EPITOME {
         CONDENSE CONSENSUS SEQS
     =============================================================================================================================
     */
-
     // MODULE: Determine pairwise Mash distances of consensus sequences.
     MASH_CONDENSE (
         ch_consensus
     )
+    ch_versions = ch_versions.mix(MASH_CONDENSE.out.versions.first())
 
     // MODULE: Condense sequences that share sequence identity below `--dist_threshold`
     CONDENSE (
         MASH_CONDENSE.out.dist.join(ch_consensus, by: [0,1]).join(BIND_CLUSTERS.out.results, by: [0,1])
     )
+    ch_versions = ch_versions.mix(CONDENSE.out.versions.first())
 
     /*
     =============================================================================================================================
@@ -253,7 +270,7 @@ workflow EPITOME {
     FASTANI_AVA (
         CONDENSE.out.results.map{ taxa, segment, summary, consensus, length -> [ taxa, segment, consensus, length ] }
     )
-    //ch_versions = ch_versions.mix(FASTANI_AVA.out.versions.first())
+    ch_versions = ch_versions.mix(FASTANI_AVA.out.versions.first())
     // Classify consensus sequences based on supplied seed sequences - if supplied
     if(params.seeds){
         Channel
@@ -266,7 +283,7 @@ workflow EPITOME {
             CONDENSE.results.map{ taxa, segment, summary, assembly, length -> assembly }.collect(),
             seeds.map{ ref, assembly -> assembly }.collect()
         )    
-        //ch_versions = ch_versions.mix(FASTANI_SEEDS.out.versions.first())
+        ch_versions = ch_versions.mix(FASTANI_SEEDS.out.versions.first())
     }
 
     /*
@@ -276,12 +293,29 @@ workflow EPITOME {
     */
     // MODULE: Create summary
     SUMMARY(
-        CONDENSE.out.results.map{taxa, segment, summary, assembly, length -> summary}.splitText(keepHeader: true).collectFile(name: 'all-summaries.csv'),
+        CONDENSE.out.results.map{ taxa, segment, summary, assembly, length -> summary }.splitText(keepHeader: true).collectFile(name: 'all-summaries.csv'),
         FASTANI_AVA.out.ani.map{ taxa, segment, ani -> ani }.splitText().collectFile(name: "all-ani.tsv"),
         params.seeds ? FASTANI_SEEDS.out.ani : [],
-        params.seeds ? file(params.seeds) : []
+        params.seeds ? file(params.seeds) : [],
+        ch_timestamp
     )
-    //ch_versions = ch_versions.mix(SUMMARY.out.versions.first())
+    ch_versions = ch_versions.mix(SUMMARY.out.versions.first())
+
+    // MODULE: Export reference samplesheet for VAPER
+    CONDENSE
+        .out
+        .results
+        .map{ taxa, segment, summary, assembly, length -> [ taxa, segment, assembly ] }
+        .transpose()
+        .map{ taxa, segment, assembly -> taxa+"\t"+segment+"\t"+assembly.getName() }
+        .collectFile(name: "sheet.tsv", newLine: true)
+        .set{ ch_ref_lines }
+    EXPORT (
+        ch_ref_lines,
+        ch_timestamp
+    )
+    ch_versions = ch_versions.mix(EXPORT.out.versions.first())
+    
 
     /*
     =============================================================================================================================

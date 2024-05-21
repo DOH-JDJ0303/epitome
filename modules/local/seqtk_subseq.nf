@@ -12,7 +12,7 @@ process SEQTK_SUBSEQ {
 
     output:
     tuple val(taxa), val(segment), val(cluster), path("${prefix}.fa"), val(count), emit: sequences
-    path "versions.yml",                                                               emit: versions
+    path "versions.yml",                                                           emit: versions
 
     when:
     task.ext.when == null || task.ext.when
@@ -27,11 +27,9 @@ process SEQTK_SUBSEQ {
         $args \\
         $sequences \\
         contigs.txt > ${prefix}.fa
-    
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        seqtk: \$(echo \$(seqtk 2>&1) | sed 's/^.*Version: //; s/ .*\$//')
-    END_VERSIONS
+
+    # odd stuff going on with versioning
+    echo -e "\\"${task.process}\\":\\n    seqtk: \$(echo \$(seqtk 2>&1) | sed 's/^.*Version: //; s/ .*\$//')" > versions.yml
     """
 }
 
