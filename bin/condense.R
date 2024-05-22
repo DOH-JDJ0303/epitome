@@ -35,43 +35,53 @@ clusters.df <- read_csv(clusters_path) %>%
 #---- LOAD SEQ LENGTHS ----#
 len.df <- read_csv(lengths_path, col_names = c("seq","length"))
 
-#---- LOAD PAIRWISE DISTANCES ----#
-dist.df <- read_tsv(dist_path, col_names = c("ID1","ID2","DIST", "PVAL", "HASH")) %>%
-  select(ID1, ID2, DIST)
-dist.mat <- dist.df %>%
-  pivot_wider(names_from="ID2", values_from="DIST") %>%
-  column_to_rownames(var="ID1") %>%
-  as.matrix() %>%
-  as.dist()
+#---- CONDENSE CLOSELY RELATED REFERENCES ----#
+# This is only performed when two or more references were generated
+if(nrow(clusters.df) > 1){
+  #---- LOAD PAIRWISE DISTANCES ----#
+  dist.df <- read_tsv(dist_path, col_names = c("ID1","ID2","DIST", "PVAL", "HASH")) %>%
+    select(ID1, ID2, DIST)
+  dist.mat <- dist.df %>%
+    pivot_wider(names_from="ID2", values_from="DIST") %>%
+    column_to_rownames(var="ID1") %>%
+    as.matrix() %>%
+    as.dist()
 
-#---- HIERARCHICAL CLUSTER ----#
-# create tree
-tree <- hclust(dist.mat, method = "complete") %>%
-  as.phylo()
-# test that tree is ultrametric and rooted (required for cutree)
-if(! is.ultrametric(tree)){ 
-  cat("Error: Tree is not ultrameric!")
-  q()
+  #---- HIERARCHICAL CLUSTER ----#
+  # create tree
+  tree <- hclust(dist.mat, method = "complete") %>%
+    as.phylo()
+  # test that tree is ultrametric and rooted (required for cutree)
+  if(! is.ultrametric(tree)){ 
+    cat("Error: Tree is not ultrameric!")
+    q()
+  }
+  if(! is.rooted(tree)){ 
+    cat("Error: Tree is not rooted!")
+    q()
+  }
+
+  #---- CUT DENDROGRAM AT DISTANCE THRESHOLD ----#
+  clusters.refs.df <- cutree(as.hclust(tree), h = as.numeric(threshold)) %>%
+    data.frame() %>%
+    rownames_to_column(var = "seq") %>%
+    rename(cluster = 2) %>%
+    left_join(clusters.df, by = "seq") %>%
+    left_join(len.df, by = "seq") %>%
+    group_by(cluster) %>%
+    mutate(n2 = n()) %>%
+    filter(!(n < 10 & n2 > 1)) %>%
+    filter(length == max(length)) %>%
+    ungroup() %>%
+    select(seq,taxa,segment,cluster,n,n2,length)
+}else{
+  clusters.refs.df <- clusters.df %>%
+    left_join(len.df, by = "seq") %>%
+    mutate(cluster = 1,
+           n2 = 1) %>%
+    select(seq,taxa,segment,cluster,n,n2,length)
 }
-if(! is.rooted(tree)){ 
-  cat("Error: Tree is not rooted!")
-  q()
-}
-
-#---- CUT DENDROGRAM AT DISTANCE THRESHOLD ----#
-clusters.refs.df <- cutree(as.hclust(tree), h = as.numeric(threshold)) %>%
-  data.frame() %>%
-  rownames_to_column(var = "seq") %>%
-  rename(cluster = 2) %>%
-  left_join(clusters.df, by = "seq") %>%
-  left_join(len.df, by = "seq") %>%
-  group_by(cluster) %>%
-  mutate(n2 = n()) %>%
-  filter(!(n < 10 & n2 > 1)) %>%
-  filter(length == max(length)) %>%
-  ungroup() %>%
-  select(seq,taxa,segment,cluster,n,n2,length)
-
+#----- SAVE OUTPUT -----#
 write.csv(x= clusters.refs.df, file = paste0(file.base,".condensed.csv"), quote = F, row.names = F)
 
 

@@ -29,7 +29,9 @@ process CONDENSE {
     do
         mv \${s}.fa.gz tmp/
     done
-    rm *.fa.gz && mv tmp/*.fa.gz ./ && rm -r tmp
+    rm *.fa.gz || true
+    mv tmp/*.fa.gz ./ || true 
+    rm -r tmp || true
     
     # get min seq length - for FastANI
     min_len=\$(cat ${prefix}.condensed.csv | cut -f 7 -d ',' | tail -n +2 | sort -n | sed -n 1p)
