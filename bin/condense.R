@@ -29,7 +29,7 @@ file.base <- paste(taxa_name,segment_name,sep="-")
 #---- LOAD CLUSTER SET & GET COUNT ----#
 clusters.df <- read_csv(clusters_path) %>%
   mutate(seq = paste(taxa,segment,cluster,sep = "-")) %>%
-  group_by(seq,taxa,segment) %>%
+  group_by(seq,taxa,segment,cluster) %>%
   count()
 
 #---- LOAD SEQ LENGTHS ----#
@@ -65,20 +65,21 @@ if(nrow(clusters.df) > 1){
   clusters.refs.df <- cutree(as.hclust(tree), h = as.numeric(threshold)) %>%
     data.frame() %>%
     rownames_to_column(var = "seq") %>%
-    rename(cluster = 2) %>%
+    rename(cluster2 = 2) %>%
     left_join(clusters.df, by = "seq") %>%
     left_join(len.df, by = "seq") %>%
-    group_by(cluster) %>%
+    group_by(cluster2) %>%
     mutate(n2 = n()) %>%
     filter(!(n < 10 & n2 > 1)) %>%
     filter(length == max(length)) %>%
+    filter(n2 == max(n2)) %>%
+    slice(1) %>%
     ungroup() %>%
     select(seq,taxa,segment,cluster,n,n2,length)
 }else{
   clusters.refs.df <- clusters.df %>%
     left_join(len.df, by = "seq") %>%
-    mutate(cluster = 1,
-           n2 = 1) %>%
+    mutate(n2 = 1) %>%
     select(seq,taxa,segment,cluster,n,n2,length)
 }
 #----- SAVE OUTPUT -----#
