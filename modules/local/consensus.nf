@@ -18,7 +18,7 @@ process CONSENSUS {
 
     """
     # run script
-    consensus.sh "${prefix}" ${aln} "${task.cpus}"
+    consensus.sh "${prefix}" ${aln}
     # compress
     gzip ${prefix}.fa
     # collect consensus size info
