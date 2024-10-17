@@ -27,7 +27,7 @@ process INPUT_QC {
         seqs=\${seqs%.gz}
     fi
     # filter sequences
-    input-qc.sh \${seqs} ${prefix} "${expected_length}" "${params.len_threshold}" "${params.max_cluster}"
+    input-qc.sh \${seqs} ${prefix} "${expected_length}" "${params.len_threshold}" "${params.amb_threshold}" "${params.max_cluster}"
 
     cat ${prefix}.top.fa ${prefix}.remainder.fa > ${prefix}.all.fa
 
