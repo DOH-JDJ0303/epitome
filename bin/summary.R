@@ -6,14 +6,16 @@ version <- "1.0"
 
 #---- ARGUMENTS ----#
 args <- commandArgs(trailingOnly = T)
-summary_file <- args[1]
-fastani_ava_file <- args[2]
-fastani_seeds_file <- args[3]
-seeds_file <- args[4]
-timestamp <- args[5]
+cluster_refs_file <- args[1]
+cluster_all_file <- args[2]
+raw_seqs_file <- args[3]
+clean_seqs_file <- args[4]
+metadata_file <- args[5]
+fastani_ava_file <- args[6]
+prefix <- args[7]
 
 #---- VERSION ----#
-if(summary_file == "version"){
+if(cluster_refs_file == "version"){
   cat(version, sep = "\n")
   quit(status=0)
 }
@@ -29,12 +31,49 @@ basename_fa <- function(path){
     
 }
 
-#---- LOAD SUMMARIES ---- #
-clusters <- read.csv(summary_file, header = F, col.names = c("seq","taxa","segment","cluster","n","n2","length")) %>%
-  mutate(condensed = case_when(n2 > 1 ~ TRUE,
-                               n2 == 1 ~ FALSE)
-                               ) %>%
-  select(-n2)
+#---- LOAD SUMMARY ---- #
+df.clusters_refs <- read_csv(cluster_refs_file)
+
+#---- CLASSIFY INPUT SEQS ----#
+# function for collapsing rows by group per column
+collapse_column <- function(col, df){
+    res <- df[,c("cluster",col)] %>%
+      rename(original = 2) %>%
+      group_by(cluster) %>%
+      mutate(collapsed = case_when( is.numeric(original) ~ paste0(min(original)," - ",max(original)),
+                                    TRUE ~ paste(unique(original), collapse = "; "))) %>%
+      select(cluster, collapsed) %>%
+      unique() %>%
+      ungroup()
+    colnames(res) <- c("cluster",col)
+    return(res)
+}
+# load raw sequences
+df.raw_seqs <- read_tsv(raw_seqs_file, col_names = c("id","bases")) %>%
+  mutate(id = str_remove(id, pattern = '\\.[0-9]+$')) %>%
+  mutate_all(as.character)
+# load cleaned sequences
+df.clean_seqs <- read_tsv(clean_seqs_file, col_names = c("seq","bases")) %>%
+  mutate_all(as.character)
+# merge cluster info with clean sequences and then raw sequences
+df.meta <- read_csv(cluster_all_file) %>%
+  mutate_all(as.character) %>%
+  select(seq, cluster) %>%
+  full_join(df.clean_seqs, by = "seq") %>%
+  full_join(df.raw_seqs, by = "bases") %>%
+  drop_na(seq) %>%
+  mutate(cluster = case_when(is.na(cluster) ~ 'filtered sequences',
+                             TRUE ~ cluster))
+if(file.exists(metadata_file)){
+  # load additional metdata & join
+  df.meta <- read_csv(metadata_file) %>%
+    right_join(df.meta, by = "id")
+}
+meta.cols <- df.meta %>%
+  select(-seq, -cluster, -bases) %>%
+  colnames()
+df.meta <- lapply(meta.cols, FUN = collapse_column, df.meta) %>%
+  reduce(left_join, by = "cluster")
 
 #---- LOAD FASTANI AVA RESULTS & ADD MISSING ----#
 fastani_ava <- read_tsv(fastani_ava_file, col_names = c("query","ref","ani","mapped","total")) %>%
@@ -42,15 +81,15 @@ fastani_ava <- read_tsv(fastani_ava_file, col_names = c("query","ref","ani","map
   mutate(query = basename_fa(query),
          ref = basename_fa(ref))
 # get list of pairwise comparisons, add back to fastani_ava, filter by taxa & segment, then calculate ID
-q_filt <- clusters %>%
+q_filt <- df.clusters_refs %>%
   select(seq, taxa, segment, length) %>%
   rename(query = seq)
-r_filt <- clusters %>%
+r_filt <- df.clusters_refs %>%
   mutate(ref = seq,
          staxa=taxa,
          sseg=segment) %>%
   select(ref, staxa, sseg)
-fastani_ava <- clusters %>%
+fastani_ava <- df.clusters_refs %>%
   select(seq) %>%
   mutate(query=seq,
          tmp='this works') %>%
@@ -94,7 +133,7 @@ ts_list <- fastani_ava %>%
   unique()
 dev_null <- lapply(ts_list, FUN = plot_matrix)
 
-#---- SUMMARIZE BLAST AVA FURTHER ----#
+#---- SUMMARIZE FASTANI AVA FURTHER ----#
 fastani_ava <- fastani_ava %>%
   filter(query != ref) %>%
   group_by(query, taxa, segment) %>%
@@ -108,31 +147,27 @@ fastani_ava <- fastani_ava %>%
   select(-taxa, -segment)
 
 #---- JOIN FINAL DATASETS & SUMMARIZE ----#
-## WITHOUT SEEDS
-clusters %>%
+# Join data sources
+df.summary <- df.clusters_refs %>%
+  mutate_all(as.character) %>%
   full_join(fastani_ava, by = "seq") %>%
-  select(seq,taxa,segment,cluster,n,condensed,length,min_ani,max_ani) %>%
-  write.csv(file = paste0(timestamp,"-summary.csv"), quote = F, row.names = F)
-
-## WITH SEEDS
-if(file.exists(fastani_seeds_file) & file.exists(seeds_file)){
-  seeds <- read.csv(seeds_file) %>% 
-    rename(seed = 1,
-           ref = 2) %>%
-    mutate(ref = basename_fa(ref))
-  read_tsv(fastani_seeds_file, col_names = c("query","ref","ani","mapped","total")) %>%
-    select(query, ref, ani) %>%
-    mutate(query = basename_fa(query),
-           ref = basename_fa(ref)) %>%
-    group_by(query) %>%
-    filter(ani == max(ani)) %>%
-    ungroup() %>%
-    filter(ani >= 95) %>%
-    mutate(ani = round(ani, digits = 1)) %>%
-    rename(seq = query,
-           seed_ani = ani) %>%
-    full_join(clusters, by = "seq") %>%
-    left_join(seeds, by = "ref") %>%
-    select(seq,taxa,segment,cluster,n,length,min_ani,max_ani, seed, seed_ani) %>%
-    write.csv(file = paste0(timestamp,"-summary.csv"), quote = F, row.names = F)
-}
+  full_join(df.meta, by = "cluster")
+# update condensed
+taxa_val <- df.summary %>%
+  drop_na(taxa) %>%
+  slice(1) %>%
+  .$taxa
+segment_val <- df.summary %>%
+  drop_na(segment) %>%
+  slice(1) %>%
+  .$segment
+df.summary <- df.summary %>%
+  group_by(cluster) %>%
+  mutate(taxa = taxa_val,
+         segment = segment_val,
+         seq = case_when( is.na(seq) & ! is.na(cluster) ~ 'Condensed' ,
+                          TRUE ~ seq ),
+         n = case_when( seq == 'Condensed' ~ as.character(length(unlist(str_split(id, pattern = '; ')))),
+                        TRUE ~ n )) %>%
+  ungroup()
+write.csv(x = df.summary, file = paste0(prefix,"-summary.csv"), quote = T, row.names = F)

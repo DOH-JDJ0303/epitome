@@ -28,6 +28,7 @@ file.base <- paste(taxa_name,segment_name,sep="-")
 
 #---- LOAD CLUSTER SET & GET COUNT ----#
 clusters.df <- read_csv(clusters_path) %>%
+  filter(taxa == taxa_name & segment == segment_name) %>%
   mutate(seq = paste(taxa,segment,cluster,sep = "-")) %>%
   group_by(seq,taxa,segment,cluster) %>%
   count()
@@ -69,18 +70,19 @@ if(nrow(clusters.df) > 1){
     left_join(clusters.df, by = "seq") %>%
     left_join(len.df, by = "seq") %>%
     group_by(cluster2) %>%
-    mutate(n2 = n()) %>%
-    filter(!(n < 10 & n2 > 1)) %>%
+    mutate(condensed = case_when(n() > 1 ~ paste(cluster, collapse = "; "),
+                                 TRUE ~ NA_character_)) %>%
+    filter(!(n < 10 & n() > 1)) %>%
     filter(length == max(length)) %>%
-    filter(n2 == max(n2)) %>%
+    filter(n() == max(n())) %>%
     slice(1) %>%
     ungroup() %>%
-    select(seq,taxa,segment,cluster,n,n2,length)
+    select(seq,taxa,segment,cluster,n,condensed,length)
 }else{
   clusters.refs.df <- clusters.df %>%
     left_join(len.df, by = "seq") %>%
-    mutate(n2 = 1) %>%
-    select(seq,taxa,segment,cluster,n,n2,length)
+    mutate(condensed = NA_character_) %>%
+    select(seq,taxa,segment,cluster,n,condensed,length)
 }
 #----- SAVE OUTPUT -----#
 write.csv(x= clusters.refs.df, file = paste0(file.base,".condensed.csv"), quote = F, row.names = F)

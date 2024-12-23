@@ -34,20 +34,18 @@ ch_multiqc_custom_methods_description = params.multiqc_methods_description ? fil
 include { TIMESTAMP                    } from '../modules/local/timestamp'
 include { INPUT_QC                     } from '../modules/local/input-qc'
 include { MASH_TOP                     } from '../modules/local/mash'
-include { CLUSTER                      } from '../modules/local/cluster'
+include { CLUSTER as CLUSTER_MAIN      } from '../modules/local/cluster'
 include { MASH_REMAINDER               } from '../modules/local/mash'
 include { ASSIGN_REMAINDER             } from '../modules/local/assign-remainder'
 include { SEQTK_LOOSEENDS              } from '../modules/local/seqtk_subseq'
 include { MASH_TOP as MASH_LOOSEENDS   } from '../modules/local/mash'
 include { CLUSTER as CLUSTER_LOOSEENDS } from '../modules/local/cluster'
-include { BIND_CLUSTERS                } from '../modules/local/bind-clusters.nf'
 include { SEQTK_SUBSEQ                 } from '../modules/local/seqtk_subseq'
 include { MAFFT                        } from '../modules/local/mafft'
 include { CONSENSUS                    } from '../modules/local/consensus'
 include { MASH_TOP as MASH_CONDENSE    } from '../modules/local/mash'
 include { CONDENSE                     } from '../modules/local/condense'
 include { FASTANI_AVA                  } from '../modules/local/fastani'
-include { FASTANI_SEEDS                } from '../modules/local/fastani'
 include { SUMMARY                      } from '../modules/local/summary'    
 include { EXPORT                       } from '../modules/local/export'    
 
@@ -96,8 +94,12 @@ workflow EPITOME {
     Channel
         .fromPath(params.input)
         .splitCsv(header:true)
-        .map{ tuple(it.taxa, it.segment, file(it.assembly, checkIfExists: true), it.length) }
-        .set{ manifest }
+        .map{ [ taxa: it.taxa, 
+                segment: it.segment, 
+                assembly: file(it.assembly, checkIfExists: true), 
+                length: it.length, 
+                metadata: it.containsKey('metadata') ? ( it.metadata ? file(it.metadata, checkIfExists: true) : [] ) : [] ] }
+        .set{ ch_input }
 
     /*
     =============================================================================================================================
@@ -107,7 +109,7 @@ workflow EPITOME {
     
     // MODULE: Filter low quality sequences & remove duplicates
     INPUT_QC(
-        manifest
+        ch_input.map{ [ it.taxa, it.segment, it.assembly, it.length ] }
     )
     ch_versions = ch_versions.mix(INPUT_QC.out.versions.first())
 
@@ -124,11 +126,19 @@ workflow EPITOME {
     ch_versions = ch_versions.mix(MASH_TOP.out.versions.first())
 
     // MODULE: Cluster subset with hclust & cutree
-    CLUSTER (
+    CLUSTER_MAIN (
         MASH_TOP.out.dist,
         "main"
     )
-    ch_versions = ch_versions.mix(CLUSTER.out.versions.first())
+    ch_versions = ch_versions.mix(CLUSTER_MAIN.out.versions.first())
+
+    // Set main cluster channel
+    CLUSTER_MAIN
+        .out
+        .results
+        .map{ taxa, segment, results -> results }
+        .splitCsv(header: true)
+        .set{ ch_cluster_main }
 
     /*
     =============================================================================================================================
@@ -142,13 +152,21 @@ workflow EPITOME {
             .seqs
             .filter{ taxa, segment, top, remainder, remainder_count -> remainder_count.toInteger() > 0 }
             .map{ taxa, segment, top, remainder, remainder_count -> [ taxa, segment, top, remainder ] }
-            .join(CLUSTER.out.results, by: [0,1])
+            .join(CLUSTER_MAIN.out.results, by: [0,1])
     )
     // MODULE: Assign the remainder of sequences to a cluster
     ASSIGN_REMAINDER (
         MASH_REMAINDER.out.results
     )
-    ch_versions = ch_versions.mix(CLUSTER.out.versions.first())
+    ch_versions = ch_versions.mix(ASSIGN_REMAINDER.out.versions.first())
+
+    // Set assigned cluster channel
+    ASSIGN_REMAINDER
+        .out
+        .assigned
+        .map{ taxa, segment, results -> results }
+        .splitCsv( header: true )
+        .set{ ch_cluster_assigned }
 
     /*
     =============================================================================================================================
@@ -178,32 +196,51 @@ workflow EPITOME {
     )
     ch_versions = ch_versions.mix(CLUSTER_LOOSEENDS.out.versions.first())
 
+    // Set loose-ends cluster channel
+    CLUSTER_LOOSEENDS
+        .out
+        .results
+        .map{ taxa, segment, results -> results }
+        .splitCsv( header: true )
+        .set{ ch_cluster_looseends }
+
     /*
     =============================================================================================================================
         CLUSTER SEQUENCES: COMBINE ALL CLUSTERS
     =============================================================================================================================
     */
-    // MODULE: Combine all cluster channels. Loose-end clusters are adjusted based on largest subset cluster.
-    BIND_CLUSTERS (
-        CLUSTER.out.results.concat(ASSIGN_REMAINDER.out.assigned).concat(CLUSTER_LOOSEENDS.out.results).groupTuple(by: [0,1])
-    )
-    ch_versions = ch_versions.mix(BIND_CLUSTERS.out.versions.first())
+    // Combine main cluster results and assigned cluster results
+    ch_cluster_main
+        .concat(ch_cluster_assigned)
+        .set{ ch_clusters }
+    // Adjust loose-end cluster numbers based on the main clustering numbers
+    ch_clusters
+        .map{ [ it.taxa, it.segment, it ] }
+        .groupTuple(by: [0,1])
+        .map{ taxa, segment, data -> [ taxa, segment, data.max{ it.cluster }.cluster ] }
+        .join( ch_cluster_looseends.map{ [ it.taxa, it.segment, it ] }.groupTuple(by: [0,1]), by: [0,1] )
+        .transpose()
+        .map{ taxa, segment, max_cluster, it -> it.cluster = it.cluster.toInteger() + max_cluster.toInteger()
+                                                it }
+        .concat(ch_clusters)
+        .map{ it.cluster = it.cluster.toString()
+              it }
+        .set{ ch_clusters }
 
-    BIND_CLUSTERS
-        .out
-        .results
-        .map{ taxa, segment, result -> result }
-        .splitCsv(header: true)
-        .map{ tuple(it.taxa, it.segment, it.cluster, it.seq) }
-        .groupTuple(by: [0,1,2])
-        .combine(INPUT_QC.out.all, by: [0,1])
-        .map{ taxa, segment, cluster, contigs, seqs -> [ taxa, segment, cluster, contigs, seqs, contigs.size() ] }
-        .set{ clusters }
-    
+    // Save to file
+    ch_clusters
+        .take(1)
+        .map{ it.keySet().join(',') }
+        .concat(ch_clusters.map{ it.values().join(',').replace(' ','_') })
+        .collectFile(name: 'clusters.csv', newLine: true, sort: 'index')
+        .set{ ch_clusters_file }
 
     // MODULE: Split clusters into multi-fasta files
     SEQTK_SUBSEQ(
-        clusters
+        ch_clusters
+            .map{ [ it.taxa, it.segment, it.cluster, it.seq ] }
+            .groupTuple(by: [0,1,2])
+            .combine(INPUT_QC.out.all, by: [0,1])        
     )
     ch_versions = ch_versions.mix(SEQTK_SUBSEQ.out.versions.first())
 
@@ -217,8 +254,8 @@ workflow EPITOME {
         SEQTK_SUBSEQ
             .out
             .sequences
-            .filter{ taxa, segment, cluster, seqs, count -> count > 1 }
-            .map{ taxa, segment, cluster, seqs, count -> [ taxa, segment, cluster, seqs ] }
+            .filter{ taxa, segment, cluster, seqs, n_seq -> n_seq.toInteger() > 1 }
+            .map{ taxa, segment, cluster, seqs, n_seq -> [ taxa, segment, cluster, seqs ] }
     )
     ch_versions = ch_versions.mix(MAFFT.out.versions.first())
 
@@ -226,11 +263,10 @@ workflow EPITOME {
     SEQTK_SUBSEQ
         .out
         .sequences
-        .filter{ taxa, segment, cluster, seqs, count -> count == 1 }
-        .map{ taxa, segment, cluster, seqs, count -> [ taxa, segment, cluster, seqs ] }
+        .filter{ taxa, segment, cluster, seqs, n_seq -> n_seq.toInteger() == 1 }
+        .map{ taxa, segment, cluster, seqs, n_seq -> [ taxa, segment, cluster, seqs ] }
         .concat(MAFFT.out.fa)
-        .set{ alignments }
-    
+        .set{ ch_alignments }
     /*
     =============================================================================================================================
         CREATE CONSENSUS 
@@ -238,7 +274,7 @@ workflow EPITOME {
     */
     // MODULE: Create consensus sequences
     CONSENSUS(
-        alignments
+        ch_alignments
     )
     ch_versions = ch_versions.mix(CONSENSUS.out.versions.first())
 
@@ -257,7 +293,11 @@ workflow EPITOME {
 
     // MODULE: Condense sequences that share sequence identity below `--dist_threshold`
     CONDENSE (
-        MASH_CONDENSE.out.dist.join(ch_consensus, by: [0,1]).join(BIND_CLUSTERS.out.results, by: [0,1])
+        MASH_CONDENSE
+            .out
+            .dist
+            .join(ch_consensus, by: [0,1])
+            .combine(ch_clusters_file)
     )
     ch_versions = ch_versions.mix(CONDENSE.out.versions.first())
 
@@ -271,33 +311,22 @@ workflow EPITOME {
         CONDENSE.out.results.map{ taxa, segment, summary, consensus, length -> [ taxa, segment, consensus, length ] }
     )
     ch_versions = ch_versions.mix(FASTANI_AVA.out.versions.first())
-    // Classify consensus sequences based on supplied seed sequences - if supplied
-    if(params.seeds){
-        Channel
-            .fromPath(params.seeds)
-            .splitCsv(header:true)
-            .map{ tuple(it.ref, file(it.assembly)) }
-            .set{ seeds }
-        // MODULE: Determine average nucleotide identity between the consensus sequences and seed sequences
-        FASTANI_SEEDS (
-            CONDENSE.results.map{ taxa, segment, summary, assembly, length -> assembly }.collect(),
-            seeds.map{ ref, assembly -> assembly }.collect()
-        )    
-        ch_versions = ch_versions.mix(FASTANI_SEEDS.out.versions.first())
-    }
 
     /*
     =============================================================================================================================
         SUMMARIZE RESULTS
     =============================================================================================================================
     */
-    // MODULE: Create summary
+    // MODULE: Create individual summaries
     SUMMARY(
-        CONDENSE.out.results.map{ taxa, segment, summary, assembly, length -> summary }.splitText(keepHeader: true).collectFile(name: 'all-summaries.csv'),
-        FASTANI_AVA.out.ani.map{ taxa, segment, ani -> ani }.splitText().collectFile(name: "all-ani.tsv"),
-        params.seeds ? FASTANI_SEEDS.out.ani : [],
-        params.seeds ? file(params.seeds) : [],
-        ch_timestamp
+        CONDENSE
+            .out
+            .results
+            .map{ taxa, segment, summary, assembly, length -> [ taxa, segment, summary ] }
+            .combine(ch_clusters_file)
+            .join(INPUT_QC.out.all, by: [0,1])
+            .join(ch_input.map{ [ it.taxa, it.segment, it.assembly, it.meta ? it.meta : [] ] }, by: [0,1])
+            .join(FASTANI_AVA.out.ani, by: [0,1])
     )
     ch_versions = ch_versions.mix(SUMMARY.out.versions.first())
 
