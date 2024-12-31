@@ -32,6 +32,7 @@ ch_multiqc_custom_methods_description = params.multiqc_methods_description ? fil
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 include { TIMESTAMP                    } from '../modules/local/timestamp'
+include { NCBI_DATA                    } from '../modules/local/ncbi-data'
 include { INPUT_QC                     } from '../modules/local/input-qc'
 include { MASH_TOP                     } from '../modules/local/mash'
 include { CLUSTER as CLUSTER_MAIN      } from '../modules/local/cluster'
@@ -75,6 +76,46 @@ include { CUSTOM_DUMPSOFTWAREVERSIONS } from '../modules/nf-core/custom/dumpsoft
 // Info required for completion email and summary
 def multiqc_report = []
 
+def formatTaxonData (row) {
+    def data = [:]
+    row[2].each{ data[it.key] = it.value }
+
+    def result = [ taxon: row[0], 
+                   accession: data.accession, 
+                   length: data.length, 
+                   collectionDate: data.containsKey('isolate') ? ( data.isolate.containsKey('collectionDate') ? data.location.collectionDate : null ) : null, 
+                   geographicRegion: data.containsKey('location') ? ( data.location.containsKey('geographicRegion') ? data.location.geographicRegion : null ) : null,
+                   organismName_host: data.containsKey('host') ? ( data.host.containsKey('organismName') ? data.host.organismName : null ) : null,
+                   organismName_virus: data.virus.organismName.split(' ').findAll{ ! it.contains('/') }.join(' '),
+                   taxIds: data.virus.lineage.taxId
+                   ]
+    return result
+}
+
+def formatSubtypeData (row) {
+    def target_keys = ['segment','subtype','genotype']
+    def results     = [ accession: row[1][0] ]
+    def keys        = row[1][1].split('\\|').toList()
+    def values      = row[1][2].split('\\|').toList()
+    if( keys.size() == values.size() ){
+        values.eachWithIndex{ value, index -> results[ keys[index] ] = value }
+    }
+    target_keys.findAll{ ! results.keySet().contains(it) }.each{ results[it] = null }
+
+    return  results.findAll { it -> ('accession'+target_keys).contains(it.key) }
+
+}
+
+def fixSegmentSynonyms(row){
+    def taxon = row[0]
+    def data  = row[1]
+    def syns  = row[2]
+    if(syns){
+        data.segment = syns.findResults { key, value -> value.contains(data.segment) ? key : null }[0]
+    }
+    return [ taxon, data ]
+}
+
 workflow EPITOME {
 
     ch_versions = Channel.empty()
@@ -94,266 +135,342 @@ workflow EPITOME {
     Channel
         .fromPath(params.input)
         .splitCsv(header:true)
-        .map{ [ taxa: it.taxa, 
-                segment: it.segment, 
-                assembly: file(it.assembly, checkIfExists: true), 
-                length: it.length, 
-                metadata: it.containsKey('metadata') ? ( it.metadata ? file(it.metadata, checkIfExists: true) : [] ) : [] ] }
+        .map{ [ taxon:    it.taxon, 
+                segment:  it.containsKey('segment') ? ( it.segment ? it.segment : 'wg') : 'wg',
+                assembly: it.containsKey('assembly') ? ( it.assembly ? file(it.assembly, checkIfExists: true) : [] ) : [], 
+                length:   it.containsKey('length') ? ( it.length ? it.length : null ) : null, 
+                metadata: it.containsKey('metadata') ? ( it.metadata ? file(it.metadata, checkIfExists: true) : [] ) : [],
+                segmentSynomyms: it.containsKey('segmentSynonyms') ? ( it.segmentSynonyms ? it.segmentSynonyms : null ) : null,
+                ] 
+                }
         .set{ ch_input }
 
     /*
     =============================================================================================================================
-        QUALITY FILTER SEQUENCES
+        GATHER TAXON DATA
     =============================================================================================================================
     */
+    if(params.ncbi){
+        NCBI_DATA(
+            ch_input.map{ it.taxon }.unique()
+        )
+        
+        NCBI_DATA
+            .out
+            .taxids
+            .splitJson()
+            .map{ taxon, data -> [ taxon, data.value instanceof List ? data.value.taxonomy.classification.species : null ]}
+            .filter{ taxon, species -> species }
+            .set{ ch_ncbi_species }
+
+        NCBI_DATA
+            .out
+            .subtype
+            .splitCsv(header: false, quote: '"')
+            .map{ formatSubtypeData(it) }
+            .set{ ch_ncbi_subtype }
+
+        NCBI_DATA
+            .out
+            .data_reports
+            .transpose()
+            .map{ taxon, json -> [ taxon, file(json).getSimpleName(), json ] }
+            .splitJson()
+            .groupTuple(by: [0,1])
+            .map{ [ it[0], formatTaxonData(it) ] }
+            .combine(ch_ncbi_species, by: 0)
+            .map{ taxon, data, species -> data.species = species.findAll{ it -> data.taxIds.contains(it.id) }.name
+                                        data.species = data.species[0]
+                                        data }
+            .map{ [ it.accession, it ] }
+            .join( ch_ncbi_subtype.map{ [ it.accession, it.findAll{ item -> item.key != 'accession' } ] }, by: 0, remainder: true )
+            .filter{ accession, main, other -> main }
+            .map{ accession, main, other -> main + (other ? other : [ subtype: null, genotype: null, segment: null ]) }
+            .set{ ch_ncbi_data }
+
+        ch_ncbi_data
+            .filter{ it.segment }
+            .map{ [ it.taxon, it.segment ] }
+            .groupTuple(by: 0)
+            .map{ taxon, segments -> [ taxon, segments.flatten().unique() ] }
+            .subscribe{ taxon, segments -> println "${taxon} Segment Options: ${segments}" }
+        
+        ch_input
+            .filter{ it.segmentSynomyms }
+            .map{   def segmentOptions = [:]
+                    it.segmentSynomyms.split(';').each{ s -> def syns = s.split('\\|').toList()
+                                                             segmentOptions[ syns.get(0) ] = (syns + syns.collect{ v -> v.toUpperCase() } + syns.collect{ v -> v.toLowerCase() }).unique()
+                                                    }
+                    [ it.taxon, segmentOptions ]
+             }
+             .set{ ch_segmentOptions }
+        ch_ncbi_data
+            .map{ [ it.taxon, it ] }
+            .groupTuple(by: 0)
+            .join(ch_segmentOptions, by: 0, remainder: true)
+            .transpose()
+            .map{ fixSegmentSynonyms(it) }
+            .groupTuple(by: 0)
+            .map{ taxon, data -> [ data,  data.segment.size() > 0 ? true : false ] }
+            .transpose()
+            .map{ data, status -> data + [ segmented: true ] }
+            .filter{ (it.segmented && it.segment) || (! it.segmented) }
+            .set{ ch_ncbi_data }
+    }
+
+    // /*
+    // =============================================================================================================================
+    //     QUALITY FILTER SEQUENCES
+    // =============================================================================================================================
+    // */
     
-    // MODULE: Filter low quality sequences & remove duplicates
-    INPUT_QC(
-        ch_input.map{ [ it.taxa, it.segment, it.assembly, it.length ] }
-    )
-    ch_versions = ch_versions.mix(INPUT_QC.out.versions.first())
+    // // MODULE: Filter low quality sequences & remove duplicates
+    // INPUT_QC(
+    //     ch_input.map{ [ it.taxon, it.segment, it.assembly, it.length ] }
+    // )
+    // ch_versions = ch_versions.mix(INPUT_QC.out.versions.first())
 
 
-    /*
-    =============================================================================================================================
-        CLUSTER SEQUENCES: CLUSTER SUBSET
-    =============================================================================================================================
-    */
-    // MODULE: Determine pairwise Mash distances of sequence subset (number determined by `--max_clusters`; will include all if lower than the assigned threshold.)
-    MASH_TOP (
-        INPUT_QC.out.seqs.map{taxa, segment, top, remainder, remainder_count -> [ taxa, segment, top ]}
-    )
-    ch_versions = ch_versions.mix(MASH_TOP.out.versions.first())
+    // /*
+    // =============================================================================================================================
+    //     CLUSTER SEQUENCES: CLUSTER SUBSET
+    // =============================================================================================================================
+    // */
+    // // MODULE: Determine pairwise Mash distances of sequence subset (number determined by `--max_clusters`; will include all if lower than the assigned threshold.)
+    // MASH_TOP (
+    //     INPUT_QC.out.seqs.map{taxon, segment, top, remainder, remainder_count -> [ taxon, segment, top ]}
+    // )
+    // ch_versions = ch_versions.mix(MASH_TOP.out.versions.first())
 
-    // MODULE: Cluster subset with hclust & cutree
-    CLUSTER_MAIN (
-        MASH_TOP.out.dist,
-        "main"
-    )
-    ch_versions = ch_versions.mix(CLUSTER_MAIN.out.versions.first())
+    // // MODULE: Cluster subset with hclust & cutree
+    // CLUSTER_MAIN (
+    //     MASH_TOP.out.dist,
+    //     "main"
+    // )
+    // ch_versions = ch_versions.mix(CLUSTER_MAIN.out.versions.first())
 
-    // Set main cluster channel
-    CLUSTER_MAIN
-        .out
-        .results
-        .map{ taxa, segment, results -> results }
-        .splitCsv(header: true)
-        .set{ ch_cluster_main }
+    // // Set main cluster channel
+    // CLUSTER_MAIN
+    //     .out
+    //     .results
+    //     .map{ taxon, segment, results -> results }
+    //     .splitCsv(header: true)
+    //     .set{ ch_cluster_main }
 
-    /*
-    =============================================================================================================================
-        CLUSTER SEQUENCES: ASSIGN REMAINING USING SUBSET CLASSIFIER
-    =============================================================================================================================
-    */
-    // MODULE: Run Mash on the remainder of sequences compared to representatives of each cluster identified in round 1
-    MASH_REMAINDER (
-        INPUT_QC
-            .out
-            .seqs
-            .filter{ taxa, segment, top, remainder, remainder_count -> remainder_count.toInteger() > 0 }
-            .map{ taxa, segment, top, remainder, remainder_count -> [ taxa, segment, top, remainder ] }
-            .join(CLUSTER_MAIN.out.results, by: [0,1])
-    )
-    // MODULE: Assign the remainder of sequences to a cluster
-    ASSIGN_REMAINDER (
-        MASH_REMAINDER.out.results
-    )
-    ch_versions = ch_versions.mix(ASSIGN_REMAINDER.out.versions.first())
+    // /*
+    // =============================================================================================================================
+    //     CLUSTER SEQUENCES: ASSIGN REMAINING USING SUBSET CLASSIFIER
+    // =============================================================================================================================
+    // */
+    // // MODULE: Run Mash on the remainder of sequences compared to representatives of each cluster identified in round 1
+    // MASH_REMAINDER (
+    //     INPUT_QC
+    //         .out
+    //         .seqs
+    //         .filter{ taxon, segment, top, remainder, remainder_count -> remainder_count.toInteger() > 0 }
+    //         .map{ taxon, segment, top, remainder, remainder_count -> [ taxon, segment, top, remainder ] }
+    //         .join(CLUSTER_MAIN.out.results, by: [0,1])
+    // )
+    // // MODULE: Assign the remainder of sequences to a cluster
+    // ASSIGN_REMAINDER (
+    //     MASH_REMAINDER.out.results
+    // )
+    // ch_versions = ch_versions.mix(ASSIGN_REMAINDER.out.versions.first())
 
-    // Set assigned cluster channel
-    ASSIGN_REMAINDER
-        .out
-        .assigned
-        .map{ taxa, segment, results -> results }
-        .splitCsv( header: true )
-        .set{ ch_cluster_assigned }
+    // // Set assigned cluster channel
+    // ASSIGN_REMAINDER
+    //     .out
+    //     .assigned
+    //     .map{ taxon, segment, results -> results }
+    //     .splitCsv( header: true )
+    //     .set{ ch_cluster_assigned }
 
-    /*
-    =============================================================================================================================
-        CLUSTER SEQUENCES: CLUSTER LOOSE-ENDS
-    =============================================================================================================================
-    */
-    SEQTK_LOOSEENDS (
-        ASSIGN_REMAINDER
-            .out
-            .not_assigned
-            .filter{ taxa, segment, seq_list, count -> count.toInteger() > 1 }
-            .map{ taxa, segment, seq_list, count -> [ taxa, segment, seq_list ] }
-            .join(INPUT_QC.out.seqs.map{ taxa, segment, top, remainder, remainder_count -> [ taxa, segment, remainder ] }, by: [0,1])
-    )
-    ch_versions = ch_versions.mix(SEQTK_LOOSEENDS.out.versions.first())
+    // /*
+    // =============================================================================================================================
+    //     CLUSTER SEQUENCES: CLUSTER LOOSE-ENDS
+    // =============================================================================================================================
+    // */
+    // SEQTK_LOOSEENDS (
+    //     ASSIGN_REMAINDER
+    //         .out
+    //         .not_assigned
+    //         .filter{ taxon, segment, seq_list, count -> count.toInteger() > 1 }
+    //         .map{ taxon, segment, seq_list, count -> [ taxon, segment, seq_list ] }
+    //         .join(INPUT_QC.out.seqs.map{ taxon, segment, top, remainder, remainder_count -> [ taxon, segment, remainder ] }, by: [0,1])
+    // )
+    // ch_versions = ch_versions.mix(SEQTK_LOOSEENDS.out.versions.first())
 
-    // MODULE: Determine pairwise Mash distances of loose-ends.
-    MASH_LOOSEENDS (
-        SEQTK_LOOSEENDS.out.sequences
-    )
-    ch_versions = ch_versions.mix(MASH_LOOSEENDS.out.versions.first())
+    // // MODULE: Determine pairwise Mash distances of loose-ends.
+    // MASH_LOOSEENDS (
+    //     SEQTK_LOOSEENDS.out.sequences
+    // )
+    // ch_versions = ch_versions.mix(MASH_LOOSEENDS.out.versions.first())
 
-    // MODULE: Cluster loose-ends with hclust & cutree
-    CLUSTER_LOOSEENDS (
-        MASH_LOOSEENDS.out.dist,
-        "looseends"
-    )
-    ch_versions = ch_versions.mix(CLUSTER_LOOSEENDS.out.versions.first())
+    // // MODULE: Cluster loose-ends with hclust & cutree
+    // CLUSTER_LOOSEENDS (
+    //     MASH_LOOSEENDS.out.dist,
+    //     "looseends"
+    // )
+    // ch_versions = ch_versions.mix(CLUSTER_LOOSEENDS.out.versions.first())
 
-    // Set loose-ends cluster channel
-    CLUSTER_LOOSEENDS
-        .out
-        .results
-        .map{ taxa, segment, results -> results }
-        .splitCsv( header: true )
-        .set{ ch_cluster_looseends }
+    // // Set loose-ends cluster channel
+    // CLUSTER_LOOSEENDS
+    //     .out
+    //     .results
+    //     .map{ taxon, segment, results -> results }
+    //     .splitCsv( header: true )
+    //     .set{ ch_cluster_looseends }
 
-    /*
-    =============================================================================================================================
-        CLUSTER SEQUENCES: COMBINE ALL CLUSTERS
-    =============================================================================================================================
-    */
-    // Combine main cluster results and assigned cluster results
-    ch_cluster_main
-        .concat(ch_cluster_assigned)
-        .set{ ch_clusters }
-    // Adjust loose-end cluster numbers based on the main clustering numbers
-    ch_clusters
-        .map{ [ it.taxa, it.segment, it ] }
-        .groupTuple(by: [0,1])
-        .map{ taxa, segment, data -> [ taxa, segment, data.max{ it.cluster }.cluster ] }
-        .join( ch_cluster_looseends.map{ [ it.taxa, it.segment, it ] }.groupTuple(by: [0,1]), by: [0,1] )
-        .transpose()
-        .map{ taxa, segment, max_cluster, it -> it.cluster = it.cluster.toInteger() + max_cluster.toInteger()
-                                                it }
-        .concat(ch_clusters)
-        .map{ it.cluster = it.cluster.toString()
-              it }
-        .set{ ch_clusters }
+    // /*
+    // =============================================================================================================================
+    //     CLUSTER SEQUENCES: COMBINE ALL CLUSTERS
+    // =============================================================================================================================
+    // */
+    // // Combine main cluster results and assigned cluster results
+    // ch_cluster_main
+    //     .concat(ch_cluster_assigned)
+    //     .set{ ch_clusters }
+    // // Adjust loose-end cluster numbers based on the main clustering numbers
+    // ch_clusters
+    //     .map{ [ it.taxon, it.segment, it ] }
+    //     .groupTuple(by: [0,1])
+    //     .map{ taxon, segment, data -> [ taxon, segment, data.max{ it.cluster }.cluster ] }
+    //     .join( ch_cluster_looseends.map{ [ it.taxon, it.segment, it ] }.groupTuple(by: [0,1]), by: [0,1] )
+    //     .transpose()
+    //     .map{ taxon, segment, max_cluster, it -> it.cluster = it.cluster.toInteger() + max_cluster.toInteger()
+    //                                             it }
+    //     .concat(ch_clusters)
+    //     .map{ it.cluster = it.cluster.toString()
+    //           it }
+    //     .set{ ch_clusters }
 
-    // Save to file
-    ch_clusters
-        .take(1)
-        .map{ it.keySet().join(',') }
-        .concat(ch_clusters.map{ it.values().join(',').replace(' ','_') })
-        .collectFile(name: 'clusters.csv', newLine: true, sort: 'index')
-        .set{ ch_clusters_file }
+    // // Save to file
+    // ch_clusters
+    //     .take(1)
+    //     .map{ it.keySet().join(',') }
+    //     .concat(ch_clusters.map{ it.values().join(',').replace(' ','_') })
+    //     .collectFile(name: 'clusters.csv', newLine: true, sort: 'index')
+    //     .set{ ch_clusters_file }
 
-    // MODULE: Split clusters into multi-fasta files
-    SEQTK_SUBSEQ(
-        ch_clusters
-            .map{ [ it.taxa, it.segment, it.cluster, it.seq ] }
-            .groupTuple(by: [0,1,2])
-            .combine(INPUT_QC.out.all, by: [0,1])        
-    )
-    ch_versions = ch_versions.mix(SEQTK_SUBSEQ.out.versions.first())
+    // // MODULE: Split clusters into multi-fasta files
+    // SEQTK_SUBSEQ(
+    //     ch_clusters
+    //         .map{ [ it.taxon, it.segment, it.cluster, it.seq ] }
+    //         .groupTuple(by: [0,1,2])
+    //         .combine(INPUT_QC.out.all, by: [0,1])        
+    // )
+    // ch_versions = ch_versions.mix(SEQTK_SUBSEQ.out.versions.first())
 
-    /*
-    =============================================================================================================================
-        ALIGN SEQUENCE CLUSTERS 
-    =============================================================================================================================
-    */
-    // MODULE: Align clustered sequences with mafft - only performed on clusters containing more than one sequence 
-    MAFFT(
-        SEQTK_SUBSEQ
-            .out
-            .sequences
-            .filter{ taxa, segment, cluster, seqs, n_seq -> n_seq.toInteger() > 1 }
-            .map{ taxa, segment, cluster, seqs, n_seq -> [ taxa, segment, cluster, seqs ] }
-    )
-    ch_versions = ch_versions.mix(MAFFT.out.versions.first())
+    // /*
+    // =============================================================================================================================
+    //     ALIGN SEQUENCE CLUSTERS 
+    // =============================================================================================================================
+    // */
+    // // MODULE: Align clustered sequences with mafft - only performed on clusters containing more than one sequence 
+    // MAFFT(
+    //     SEQTK_SUBSEQ
+    //         .out
+    //         .sequences
+    //         .filter{ taxon, segment, cluster, seqs, n_seq -> n_seq.toInteger() > 1 }
+    //         .map{ taxon, segment, cluster, seqs, n_seq -> [ taxon, segment, cluster, seqs ] }
+    // )
+    // ch_versions = ch_versions.mix(MAFFT.out.versions.first())
 
-    // recombine with singletons (i.e., clusters containing 1 sequence)
-    SEQTK_SUBSEQ
-        .out
-        .sequences
-        .filter{ taxa, segment, cluster, seqs, n_seq -> n_seq.toInteger() == 1 }
-        .map{ taxa, segment, cluster, seqs, n_seq -> [ taxa, segment, cluster, seqs ] }
-        .concat(MAFFT.out.fa)
-        .set{ ch_alignments }
-    /*
-    =============================================================================================================================
-        CREATE CONSENSUS 
-    =============================================================================================================================
-    */
-    // MODULE: Create consensus sequences
-    CONSENSUS(
-        ch_alignments
-    )
-    ch_versions = ch_versions.mix(CONSENSUS.out.versions.first())
+    // // recombine with singletons (i.e., clusters containing 1 sequence)
+    // SEQTK_SUBSEQ
+    //     .out
+    //     .sequences
+    //     .filter{ taxon, segment, cluster, seqs, n_seq -> n_seq.toInteger() == 1 }
+    //     .map{ taxon, segment, cluster, seqs, n_seq -> [ taxon, segment, cluster, seqs ] }
+    //     .concat(MAFFT.out.fa)
+    //     .set{ ch_alignments }
+    // /*
+    // =============================================================================================================================
+    //     CREATE CONSENSUS 
+    // =============================================================================================================================
+    // */
+    // // MODULE: Create consensus sequences
+    // CONSENSUS(
+    //     ch_alignments
+    // )
+    // ch_versions = ch_versions.mix(CONSENSUS.out.versions.first())
 
-    CONSENSUS.out.fa.groupTuple(by: [0,1]).set{ ch_consensus }
+    // CONSENSUS.out.fa.groupTuple(by: [0,1]).set{ ch_consensus }
 
-    /*
-    =============================================================================================================================
-        CONDENSE CONSENSUS SEQS
-    =============================================================================================================================
-    */
-    // MODULE: Determine pairwise Mash distances of consensus sequences.
-    MASH_CONDENSE (
-        ch_consensus
-    )
-    ch_versions = ch_versions.mix(MASH_CONDENSE.out.versions.first())
+    // /*
+    // =============================================================================================================================
+    //     CONDENSE CONSENSUS SEQS
+    // =============================================================================================================================
+    // */
+    // // MODULE: Determine pairwise Mash distances of consensus sequences.
+    // MASH_CONDENSE (
+    //     ch_consensus
+    // )
+    // ch_versions = ch_versions.mix(MASH_CONDENSE.out.versions.first())
 
-    // MODULE: Condense sequences that share sequence identity below `--dist_threshold`
-    CONDENSE (
-        MASH_CONDENSE
-            .out
-            .dist
-            .join(ch_consensus, by: [0,1])
-            .combine(ch_clusters_file)
-    )
-    ch_versions = ch_versions.mix(CONDENSE.out.versions.first())
+    // // MODULE: Condense sequences that share sequence identity below `--dist_threshold`
+    // CONDENSE (
+    //     MASH_CONDENSE
+    //         .out
+    //         .dist
+    //         .join(ch_consensus, by: [0,1])
+    //         .combine(ch_clusters_file)
+    // )
+    // ch_versions = ch_versions.mix(CONDENSE.out.versions.first())
 
-    /*
-    =============================================================================================================================
-        GATHER DATA ON FINAL SEQUENCES
-    =============================================================================================================================
-    */
-    // MODULE: Determine average nucleotide identity between consensus sequences
-    FASTANI_AVA (
-        CONDENSE.out.results.map{ taxa, segment, summary, consensus, length -> [ taxa, segment, consensus, length ] }
-    )
-    ch_versions = ch_versions.mix(FASTANI_AVA.out.versions.first())
+    // /*
+    // =============================================================================================================================
+    //     GATHER DATA ON FINAL SEQUENCES
+    // =============================================================================================================================
+    // */
+    // // MODULE: Determine average nucleotide identity between consensus sequences
+    // FASTANI_AVA (
+    //     CONDENSE.out.results.map{ taxon, segment, summary, consensus, length -> [ taxon, segment, consensus, length ] }
+    // )
+    // ch_versions = ch_versions.mix(FASTANI_AVA.out.versions.first())
 
-    /*
-    =============================================================================================================================
-        SUMMARIZE RESULTS
-    =============================================================================================================================
-    */
-    // MODULE: Create individual summaries
-    SUMMARY(
-        CONDENSE
-            .out
-            .results
-            .map{ taxa, segment, summary, assembly, length -> [ taxa, segment, summary ] }
-            .combine(ch_clusters_file)
-            .join(INPUT_QC.out.all, by: [0,1])
-            .join(ch_input.map{ [ it.taxa, it.segment, it.assembly, it.meta ? it.meta : [] ] }, by: [0,1])
-            .join(FASTANI_AVA.out.ani, by: [0,1])
-    )
-    ch_versions = ch_versions.mix(SUMMARY.out.versions.first())
+    // /*
+    // =============================================================================================================================
+    //     SUMMARIZE RESULTS
+    // =============================================================================================================================
+    // */
+    // // MODULE: Create individual summaries
+    // SUMMARY(
+    //     CONDENSE
+    //         .out
+    //         .results
+    //         .map{ taxon, segment, summary, assembly, length -> [ taxon, segment, summary ] }
+    //         .combine(ch_clusters_file)
+    //         .join(INPUT_QC.out.all, by: [0,1])
+    //         .join(ch_input.map{ [ it.taxon, it.segment, it.assembly, it.metadata ] }, by: [0,1])
+    //         .join(FASTANI_AVA.out.ani, by: [0,1])
+    // )
+    // ch_versions = ch_versions.mix(SUMMARY.out.versions.first())
 
-    // MODULE: Export reference samplesheet for VAPER
-    CONDENSE
-        .out
-        .results
-        .map{ taxa, segment, summary, assembly, length -> [ taxa, segment, assembly ] }
-        .transpose()
-        .map{ taxa, segment, assembly -> taxa+"\t"+segment+"\t"+assembly.getName() }
-        .collectFile(name: "sheet.tsv", newLine: true)
-        .set{ ch_ref_lines }
-    EXPORT (
-        ch_ref_lines,
-        ch_timestamp
-    )
-    ch_versions = ch_versions.mix(EXPORT.out.versions.first())
+    // // MODULE: Export reference samplesheet for VAPER
+    // CONDENSE
+    //     .out
+    //     .results
+    //     .map{ taxon, segment, summary, assembly, length -> [ taxon, segment, assembly ] }
+    //     .transpose()
+    //     .map{ taxon, segment, assembly -> taxon+"\t"+segment+"\t"+assembly.getName() }
+    //     .collectFile(name: "sheet.tsv", newLine: true)
+    //     .set{ ch_ref_lines }
+    // EXPORT (
+    //     ch_ref_lines,
+    //     ch_timestamp
+    // )
+    // ch_versions = ch_versions.mix(EXPORT.out.versions.first())
     
 
-    /*
-    =============================================================================================================================
-        NEXTFLOW DEFAULTS
-    =============================================================================================================================
-    */
-    CUSTOM_DUMPSOFTWAREVERSIONS (
-        ch_versions.unique().collectFile(name: 'collated_versions.yml')
-    )
+    // /*
+    // =============================================================================================================================
+    //     NEXTFLOW DEFAULTS
+    // =============================================================================================================================
+    // */
+    // CUSTOM_DUMPSOFTWAREVERSIONS (
+    //     ch_versions.unique().collectFile(name: 'collated_versions.yml')
+    // )
 }
 
 /*

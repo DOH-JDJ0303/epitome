@@ -50,7 +50,6 @@ collapse_column <- function(col, df){
 }
 # load raw sequences
 df.raw_seqs <- read_tsv(raw_seqs_file, col_names = c("id","bases")) %>%
-  mutate(id = str_remove(id, pattern = '\\.[0-9]+$')) %>%
   mutate_all(as.character)
 # load cleaned sequences
 df.clean_seqs <- read_tsv(clean_seqs_file, col_names = c("seq","bases")) %>%
@@ -66,7 +65,8 @@ df.meta <- read_csv(cluster_all_file) %>%
                              TRUE ~ cluster))
 if(file.exists(metadata_file)){
   # load additional metdata & join
-  df.meta <- read_csv(metadata_file) %>%
+  df.meta <- read_tsv(metadata_file) %>%
+    rename(id = 1) %>%
     right_join(df.meta, by = "id")
 }
 meta.cols <- df.meta %>%
