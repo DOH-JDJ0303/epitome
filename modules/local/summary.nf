@@ -18,7 +18,7 @@ process SUMMARY {
     prefix = "${taxa}-${segment}"
     """
     # convert reference and inputs into tab-separated format
-    zcat ${raw} | sed 's/>.*\$/@&@/g' | tr -d '\n' | tr '@' '\n' | tail -n +2 | tr -d '>' | paste - - | awk -v OFS='\t' '{print \$1,toupper(\$2)}' > raw.txt
+    zcat ${raw} | cut -f 1 -d ' ' | sed 's/>.*\$/@&@/g' | tr -d '\n' | tr '@' '\n' | tail -n +2 | tr -d '>' | paste - - | awk -v OFS='\t' '{print \$1,toupper(\$2)}' > raw.txt
     cat ${clean} | sed 's/>.*\$/@&@/g' | tr -d '\n' | tr '@' '\n' | tail -n +2 | tr -d '>' | paste - - | awk -v OFS='\t' '{print \$1,toupper(\$2)}' > clean.txt
 
     # run script

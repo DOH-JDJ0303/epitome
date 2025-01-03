@@ -1,3 +1,40 @@
+process SEQTK_NCBI {
+    tag "${prefix}"
+    label 'process_single'
+
+    conda "${moduleDir}/environment.yml"
+    container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
+        'https://depot.galaxyproject.org/singularity/seqtk:1.4--he4a0461_1' :
+        'quay.io/biocontainers/seqtk:1.4--he4a0461_1' }"
+
+    input:
+    tuple val(taxa), path(contigs), val(segment), val(seqs)
+
+    output:
+    tuple val(taxa), val(segment), path("${prefix}.ncbi.fa.gz"), env(LENGTH), emit: sequences
+    path "versions.yml",                                                      emit: versions
+
+    when:
+    task.ext.when == null || task.ext.when
+
+    script:
+    def args   = task.ext.args   ?: ''
+    prefix = "${taxa}-${segment}"
+    """
+    seqtk \\
+        subseq \\
+        ${args} \\
+        ${contigs} \\
+        <(echo "${seqs.join('\n')}") | \\
+        gzip > ${prefix}.ncbi.fa.gz
+
+    LENGTH=\$(zcat ${prefix}.ncbi.fa.gz | grep -v '>' | awk '{ sum += length(\$1); count++ } END { print sum/count }')
+
+    # odd stuff going on with versioning
+    echo -e "\\"${task.process}\\":\\n    seqtk: \$(echo \$(seqtk 2>&1) | sed 's/^.*Version: //; s/ .*\$//')" > versions.yml
+    """
+}
+
 process SEQTK_SUBSEQ {
     tag "${prefix}"
     label 'process_single'

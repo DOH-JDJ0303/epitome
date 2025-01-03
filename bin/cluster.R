@@ -9,7 +9,7 @@ version <- "1.0"
 #---- ARGUMENTS ----#
 args <- commandArgs(trailingOnly = T)
 dist_path <- args[1]
-taxa_name <- args[2]
+taxon_name <- args[2]
 segment_name <- args[3]
 iteration <- args[4]
 threshold <- args[5]
@@ -26,7 +26,7 @@ library(ggtree)
 library(ape)
 
 # set output file name
-file.name <- paste(taxa_name,segment_name,iteration,sep="-")
+file.name <- paste(taxon_name,segment_name,iteration,sep="-")
 
 #---- LOAD PAIRWISE DISTANCES ----#
 dist.df <- read_tsv(dist_path, col_names = c("ID1","ID2","DIST")) %>%
@@ -57,9 +57,9 @@ clusters <- cutree(as.hclust(tree), h = as.numeric(threshold)) %>%
   rownames_to_column(var = "seq") %>%
   rename(cluster = 2) %>%
   mutate(seq = as.numeric(seq),
-         taxa = taxa_name,
+         taxon = taxon_name,
          segment = segment_name) %>%
-  select(seq, taxa, segment, cluster)
+  select(seq, taxon, segment, cluster)
 
 # adjust height to percentage for more intuitive interpretation
 tree$edge.length <- 100*tree$edge.length

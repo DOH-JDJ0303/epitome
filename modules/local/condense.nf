@@ -7,8 +7,8 @@ process CONDENSE {
     tuple val(taxa), val(segment), path(dist), path(consensus), path(clusters)
 
     output:
-    tuple val(taxa), val(segment), path("${prefix}.condensed.csv"), path("*.fa.gz", includeInputs: true), env(min_len), emit: results
-    path "versions.yml",                                                                                                emit: versions
+    tuple val(taxa), val(segment), path("${prefix}.condensed.csv"), path("*.fa.gz", includeInputs: true), emit: results
+    path "versions.yml",                                                                                  emit: versions
 
 
     when:
@@ -25,16 +25,13 @@ process CONDENSE {
 
     # remove sequences that will not be retained
     mkdir tmp
-    for s in \$(cat ${prefix}.condensed.csv | tail -n +2 | cut -f 1 -d ',')
+    for s in \$(cat ${prefix}.condensed.csv | tr -d '"' | tail -n +2 | awk -v FS=',' '\$1 != "condensed" {print \$1}')
     do
         mv \${s}.fa.gz tmp/
     done
     rm *.fa.gz || true
     mv tmp/*.fa.gz ./ || true 
     rm -r tmp || true
-    
-    # get min seq length - for FastANI
-    min_len=\$(cat ${prefix}.condensed.csv | cut -f 7 -d ',' | tail -n +2 | sort -n | sed -n 1p)
 
     # something about the normal way of getting version info messes with the creations of .command.env
     echo -e "\\"${task.process}\\":\\n    condense.R: \$(condense.R version)" > versions.yml

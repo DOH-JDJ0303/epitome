@@ -9,7 +9,7 @@ args <- commandArgs(trailingOnly = T)
 dist_path <- args[1]
 lengths_path <- args[2]
 clusters_path <- args[3]
-taxa_name <- args[4]
+taxon_name <- args[4]
 segment_name <- args[5]
 threshold <- args[6]
 
@@ -24,17 +24,17 @@ library(tidyverse)
 library(ggtree)
 library(ape)
 
-file.base <- paste(taxa_name,segment_name,sep="-")
+file.base <- paste(taxon_name,segment_name,sep="-")
 
 #---- LOAD CLUSTER SET & GET COUNT ----#
 clusters.df <- read_csv(clusters_path) %>%
-  filter(taxa == taxa_name & segment == segment_name) %>%
-  mutate(seq = paste(taxa,segment,cluster,sep = "-")) %>%
-  group_by(seq,taxa,segment,cluster) %>%
+  filter(taxon == taxon_name & segment == segment_name) %>%
+  mutate(ref = paste(taxon,segment,cluster,sep = "-")) %>%
+  group_by(ref,taxon,segment,cluster) %>%
   count()
 
 #---- LOAD SEQ LENGTHS ----#
-len.df <- read_csv(lengths_path, col_names = c("seq","length"))
+len.df <- read_csv(lengths_path, col_names = c("ref","length"))
 
 #---- CONDENSE CLOSELY RELATED REFERENCES ----#
 # This is only performed when two or more references were generated
@@ -65,27 +65,34 @@ if(nrow(clusters.df) > 1){
   #---- CUT DENDROGRAM AT DISTANCE THRESHOLD ----#
   clusters.refs.df <- cutree(as.hclust(tree), h = as.numeric(threshold)) %>%
     data.frame() %>%
-    rownames_to_column(var = "seq") %>%
+    rownames_to_column(var = "ref") %>%
     rename(cluster2 = 2) %>%
-    left_join(clusters.df, by = "seq") %>%
-    left_join(len.df, by = "seq") %>%
+    left_join(clusters.df, by = "ref") %>%
+    left_join(len.df, by = "ref") %>%
     group_by(cluster2) %>%
-    mutate(condensed = case_when(n() > 1 ~ paste(cluster, collapse = "; "),
-                                 TRUE ~ NA_character_)) %>%
+    mutate(condensed = case_when(n() > 1 ~ paste0('[',paste(cluster, collapse = ","),']'),
+                                 TRUE ~ '[]'))
+  select.refs <- clusters.refs.df %>%
     filter(!(n < 10 & n() > 1)) %>%
     filter(length == max(length)) %>%
     filter(n() == max(n())) %>%
     slice(1) %>%
     ungroup() %>%
-    select(seq,taxa,segment,cluster,n,condensed,length)
+    select(ref,taxon,segment,cluster,n,condensed,length)
+  clusters.refs.df <- clusters.refs.df %>%
+    filter(!(ref %in% select.refs$ref)) %>%
+    mutate(ref = 'condensed') %>%
+    ungroup() %>%
+    select(ref,taxon,segment,cluster,n,condensed,length) %>%
+    rbind(select.refs)
 }else{
   clusters.refs.df <- clusters.df %>%
-    left_join(len.df, by = "seq") %>%
-    mutate(condensed = NA_character_) %>%
-    select(seq,taxa,segment,cluster,n,condensed,length)
+    left_join(len.df, by = "ref") %>%
+    mutate(condensed = '[]') %>%
+    select(ref,taxon,segment,cluster,n,condensed,length)
 }
 #----- SAVE OUTPUT -----#
-write.csv(x= clusters.refs.df, file = paste0(file.base,".condensed.csv"), quote = F, row.names = F)
+write.csv(x= clusters.refs.df, file = paste0(file.base,".condensed.csv"), row.names = F)
 
 
 

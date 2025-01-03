@@ -49,8 +49,9 @@ collapse_column <- function(col, df){
     return(res)
 }
 # load raw sequences
-df.raw_seqs <- read_tsv(raw_seqs_file, col_names = c("id","bases")) %>%
+df.raw_seqs <- read_tsv(raw_seqs_file, col_names = c("accession","bases")) %>%
   mutate_all(as.character)
+print(df.raw_seqs)
 # load cleaned sequences
 df.clean_seqs <- read_tsv(clean_seqs_file, col_names = c("seq","bases")) %>%
   mutate_all(as.character)
@@ -63,11 +64,11 @@ df.meta <- read_csv(cluster_all_file) %>%
   drop_na(seq) %>%
   mutate(cluster = case_when(is.na(cluster) ~ 'filtered sequences',
                              TRUE ~ cluster))
+
 if(file.exists(metadata_file)){
   # load additional metdata & join
-  df.meta <- read_tsv(metadata_file) %>%
-    rename(id = 1) %>%
-    right_join(df.meta, by = "id")
+  df.meta <- read_csv(metadata_file) %>%
+    right_join(df.meta, by = "accession")
 }
 meta.cols <- df.meta %>%
   select(-seq, -cluster, -bases) %>%
@@ -75,20 +76,22 @@ meta.cols <- df.meta %>%
 df.meta <- lapply(meta.cols, FUN = collapse_column, df.meta) %>%
   reduce(left_join, by = "cluster")
 
+print(data.frame(df.meta))
+
 #---- LOAD FASTANI AVA RESULTS & ADD MISSING ----#
 fastani_ava <- read_tsv(fastani_ava_file, col_names = c("query","ref","ani","mapped","total")) %>%
   select(query, ref, ani) %>%
   mutate(query = basename_fa(query),
          ref = basename_fa(ref))
-# get list of pairwise comparisons, add back to fastani_ava, filter by taxa & segment, then calculate ID
+# get list of pairwise comparisons, add back to fastani_ava, filter by taxon & segment, then calculate ID
 q_filt <- df.clusters_refs %>%
-  select(seq, taxa, segment, length) %>%
+  select(seq, taxon, segment, length) %>%
   rename(query = seq)
 r_filt <- df.clusters_refs %>%
   mutate(ref = seq,
-         staxa=taxa,
+         staxon=taxon,
          sseg=segment) %>%
-  select(ref, staxa, sseg)
+  select(ref, staxon, sseg)
 fastani_ava <- df.clusters_refs %>%
   select(seq) %>%
   mutate(query=seq,
@@ -99,17 +102,17 @@ fastani_ava <- df.clusters_refs %>%
   full_join(fastani_ava, by = c("query", "ref")) %>%
   full_join(q_filt, by = "query") %>%
   full_join(r_filt, by = "ref") %>%
-  filter(taxa == staxa & segment == sseg) %>%
+  filter(taxon == staxon & segment == sseg) %>%
   drop_na(query, ref) %>%
   mutate_all(~replace(., is.na(.), 0)) %>%
-  select(-staxa, -sseg)
+  select(-staxon, -sseg)
 write.csv(x=fastani_ava, file = "full-ani.csv", quote = F, row.names = F)
 #---- PLOT MATRIX ----#
 plot_matrix <- function(ts){
   # subset datafralsme & create plot
   df <- fastani_ava %>%
-    mutate(taxa_seg = paste(taxa,segment, sep = "-")) %>%
-    filter(taxa_seg == ts)
+    mutate(taxon_seg = paste(taxon,segment, sep = "-")) %>%
+    filter(taxon_seg == ts)
   p <-ggplot(df, aes(x=query, y=ref, fill = ani))+
       geom_tile()+
       theme_bw()+
@@ -128,15 +131,15 @@ plot_matrix <- function(ts){
 }
 
 ts_list <- fastani_ava %>%
-  mutate(taxa_seg = paste(taxa,segment, sep = "-")) %>%
-  .$taxa_seg %>%
+  mutate(taxon_seg = paste(taxon,segment, sep = "-")) %>%
+  .$taxon_seg %>%
   unique()
 dev_null <- lapply(ts_list, FUN = plot_matrix)
 
 #---- SUMMARIZE FASTANI AVA FURTHER ----#
 fastani_ava <- fastani_ava %>%
   filter(query != ref) %>%
-  group_by(query, taxa, segment) %>%
+  group_by(query, taxon, segment) %>%
   summarise(min_ani = round(min(ani), digits = 1), max_ani = round(max(ani), digits = 1)) %>%
   mutate(min_ani = case_when(min_ani < 80 ~ '< 80',
                              TRUE ~ as.character(min_ani)),
@@ -144,30 +147,30 @@ fastani_ava <- fastani_ava %>%
                              TRUE ~ as.character(max_ani))) %>%
   rename(seq = query) %>%
   ungroup() %>%
-  select(-taxa, -segment)
+  select(-taxon, -segment)
 
 #---- JOIN FINAL DATASETS & SUMMARIZE ----#
 # Join data sources
 df.summary <- df.clusters_refs %>%
   mutate_all(as.character) %>%
   full_join(fastani_ava, by = "seq") %>%
-  full_join(df.meta, by = "cluster")
+  full_join(df.meta, by = c("taxon","segment","cluster"))
 # update condensed
-taxa_val <- df.summary %>%
-  drop_na(taxa) %>%
+taxon_val <- df.summary %>%
+  drop_na(taxon) %>%
   slice(1) %>%
-  .$taxa
+  .$taxon
 segment_val <- df.summary %>%
   drop_na(segment) %>%
   slice(1) %>%
   .$segment
 df.summary <- df.summary %>%
   group_by(cluster) %>%
-  mutate(taxa = taxa_val,
+  mutate(taxon = taxon_val,
          segment = segment_val,
          seq = case_when( is.na(seq) & ! is.na(cluster) ~ 'Condensed' ,
                           TRUE ~ seq ),
-         n = case_when( seq == 'Condensed' ~ as.character(length(unlist(str_split(id, pattern = '; ')))),
+         n = case_when( seq == 'Condensed' ~ as.character(length(unlist(str_split(accession, pattern = '; ')))),
                         TRUE ~ n )) %>%
   ungroup()
 write.csv(x = df.summary, file = paste0(prefix,"-summary.csv"), quote = T, row.names = F)
