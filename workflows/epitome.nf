@@ -31,10 +31,10 @@ ch_multiqc_custom_methods_description = params.multiqc_methods_description ? fil
     IMPORT LOCAL MODULES/SUBWORKFLOWS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
-include { INPUT_QC                     } from '../subworkflows/local/input-qc'
 include { NCBI_DATA_SUBWF              } from '../subworkflows/local/ncbi-data'
 
 include { TIMESTAMP                    } from '../modules/local/timestamp'
+include { INPUT_QC                     } from '../modules/local/input-qc'
 include { MASH_TOP                     } from '../modules/local/mash'
 include { CLUSTER as CLUSTER_MAIN      } from '../modules/local/cluster'
 include { MASH_REMAINDER               } from '../modules/local/mash'
@@ -47,6 +47,7 @@ include { MAFFT                        } from '../modules/local/mafft'
 include { CONSENSUS                    } from '../modules/local/consensus'
 include { MASH_TOP as MASH_CONDENSE    } from '../modules/local/mash'
 include { CONDENSE                     } from '../modules/local/condense'
+include { SUMMARY                      } from '../modules/local/summary'
 
 
 //
@@ -95,7 +96,6 @@ workflow EPITOME {
         .map{ [ taxon:    it.taxon, 
                 segment:  it.containsKey('segment') ? ( it.segment ? it.segment : 'wg') : 'wg',
                 assembly: it.containsKey('assembly') ? ( it.assembly ? file(it.assembly, checkIfExists: true) : [] ) : [], 
-                length:   it.containsKey('length') ? ( it.length ? it.length : null ) : null, 
                 metadata: it.containsKey('metadata') ? ( it.metadata ? file(it.metadata, checkIfExists: true) : [] ) : [],
                 segmentSynomyms: it.containsKey('segmentSynonyms') ? ( it.segmentSynonyms ? it.segmentSynonyms : null ) : null,
                 ] 
@@ -121,7 +121,15 @@ workflow EPITOME {
     */
     INPUT_QC(
         ch_input
+            .map{ [ it.taxon, it.segment, it.assembly ] }
     )
+    ch_versions = ch_versions.mix(INPUT_QC.out.versions.first())
+
+    INPUT_QC
+        .out
+        .seqs
+        .map{taxon, segment, all, top, remainder, status -> [ taxon: taxon, segment: segment, all: all, top: status == 'null' ? null : top, remainder: status == 'null' ? null : remainder, status: status == 'null' ? null : status ]}
+        .set{ ch_input_qc }
 
     /*
     =============================================================================================================================
@@ -130,7 +138,8 @@ workflow EPITOME {
     */
     // MODULE: Determine pairwise Mash distances of sequence subset (number determined by `--max_clusters`; will include all if lower than the assigned threshold.)
     MASH_TOP (
-        INPUT_QC.out.seqs.map{taxon, segment, all, top, remainder, remainder_count -> [ taxon, segment, top ]}
+        ch_input_qc
+            .map{ [ it.taxon, it.segment, it.status ? it.top : it.all ] }
     )
     ch_versions = ch_versions.mix(MASH_TOP.out.versions.first())
 
@@ -156,11 +165,9 @@ workflow EPITOME {
     */
     // MODULE: Run Mash on the remainder of sequences compared to representatives of each cluster identified in round 1
     MASH_REMAINDER (
-        INPUT_QC
-            .out
-            .seqs
-            .filter{ taxon, segment, all, top, remainder, remainder_count -> remainder_count.toInteger() > 0 }
-            .map{ taxon, segment, all, top, remainder, remainder_count -> [ taxon, segment, top, remainder ] }
+        ch_input_qc
+            .filter{ it.status }
+            .map{ [ it.taxon, it.segment, it.top, it.remainder ] }
             .join(CLUSTER_MAIN.out.results, by: [0,1])
     )
     // MODULE: Assign the remainder of sequences to a cluster
@@ -188,7 +195,7 @@ workflow EPITOME {
             .not_assigned
             .filter{ taxon, segment, seq_list, count -> count.toInteger() > 1 }
             .map{ taxon, segment, seq_list, count -> [ taxon, segment, seq_list ] }
-            .join(INPUT_QC.out.seqs.map{ taxon, segment, all, top, remainder, remainder_count -> [ taxon, segment, remainder ] }, by: [0,1])
+            .join(ch_input_qc.map{ [ it.taxon, it.segment, it.remainder ] }, by: [0,1])
     )
     ch_versions = ch_versions.mix(SEQTK_LOOSEENDS.out.versions.first())
 
@@ -253,7 +260,7 @@ workflow EPITOME {
         ch_clusters
             .map{ [ it.taxon, it.segment, it.cluster, it.seq ] }
             .groupTuple(by: [0,1,2])
-            .combine(INPUT_QC.out.seqs.map{ taxon, segment, all, top, remainder, remainder_count -> [ taxon, segment, all ] }, by: [0,1])        
+            .combine(ch_input_qc.map{ [ it.taxon, it.segment, it.all ] }, by: [0,1])        
     )
     ch_versions = ch_versions.mix(SEQTK_SUBSEQ.out.versions.first())
 
@@ -315,53 +322,20 @@ workflow EPITOME {
     ch_versions = ch_versions.mix(CONDENSE.out.versions.first())
 
     /*
-    =============================================================================================================================
-        SUMMARIZE RESULTS
-    =============================================================================================================================
+     =============================================================================================================================
+         SUMMARIZE RESULTS
+     =============================================================================================================================
     */
-    // Load metadata & save to file
-    ch_input
-        .map{ it.metadata }
-        .splitCsv(header: true, quote: '"')
-        .set{ ch_metadata }
-    ch_metadata
-        .map{ [ it.taxon, it.segment, it ] }
-        .groupTuple(by: [0,1])
-        .subscribe{ taxon, segment, data -> def table = channelToTable(data)
-                                      def fwork = file(workflow.workDir).resolve("${taxon}-${segment}-metadata.csv")
-                                      def fres  = file(params.outdir).resolve(taxon).resolve(segment).resolve('metadata').resolve("metadata.csv")
-                                      fwork.text = table
-                                      fwork.copyTo(fres)
-        }
-    // Combine data channels
-    INPUT_QC
-        .out
-        .qc
-        .map{ [ it.accessions, it ] }
-        .transpose()
-        .join(ch_metadata.map{ [ it.accession, it ] }, by: 0, remainder: true) // Input QC + Metadata
-        .filter{ accession, qc, meta -> qc }
-        .map{ accession, qc, meta -> qc + (meta ? meta : [ metadata: 'none' ]) }
-        .map{ [ it.taxon, it.segment, it.seq.toString(), it ] }
-        .combine(ch_clusters.map{ [ it.taxon, it.segment, it.seq, it.cluster ] }, by: [0,1,2]) // + Clusters     
-        .groupTuple(by: [0,1,4])
-        .map{ collapseKeys(it) } // Consolidate rows for groups of taxon, segment, cluster
-        .map{ [ it.taxon, it.segment, it.cluster, it ] }
-        .join(CONDENSE.out.results.map{ taxon, segment, summary, assembly -> summary }.splitCsv(header: true, quote: '"').map{ [ it.taxon, it.segment, it.cluster, it ] }, by: [0,1,2], remainder: true) // + Final references
-        .map{ taxon, segment, cluster, data1, data2 -> def data = data1 + data2
-                                                       def unwantedKeys = ['accessions','illegalBases','filters','filter']
-                                                       unwantedKeys.each{ key -> data.remove(key) } // Remove unwanted keys
-                                                       [ taxon, segment, cluster, data ] } 
-        .groupTuple(by: [0,1])
-        .subscribe{ taxon, segment, cluster, data -> def table = channelToTable(data)
-                                                     def fwork = file(workflow.workDir).resolve("${taxon}-${segment}-summary.csv")
-                                                     def fres  = file(params.outdir).resolve(taxon).resolve(segment).resolve("summary.csv")
-                                                     fwork.text = table
-                                                     fwork.copyTo(fres)
-        }
-    
+    SUMMARY (
+        INPUT_QC
+            .out
+            .summary
+            .join(ch_clusters_file.map{ [ it.taxon, it.segment, it.file ] }, by: [0,1])
+            .join(CONDENSE.out.results.map{ taxon, segment, summary, assembly -> [ taxon, segment, summary ] }, by: [0,1])
+            .join( ch_input.map{ [ it.taxon, it.segment, it.metadata ] }, by: [0,1] )
+    )
 
-    // // MODULE: Export reference samplesheet for VAPER
+    // MODULE: Export reference samplesheet for VAPER
     CONDENSE
         .out
         .results

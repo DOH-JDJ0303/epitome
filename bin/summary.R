@@ -1,21 +1,18 @@
 #!/usr/bin/env Rscript
-version <- "1.0"
+version <- "2.0"
 
 # summary.R
 # Author: Jared Johnson, jared.johnson@doh.wa.gov
 
 #---- ARGUMENTS ----#
 args <- commandArgs(trailingOnly = T)
-cluster_refs_file <- args[1]
-cluster_all_file <- args[2]
-raw_seqs_file <- args[3]
-clean_seqs_file <- args[4]
-metadata_file <- args[5]
-fastani_ava_file <- args[6]
-prefix <- args[7]
+input_qc_file <- args[1]
+clusters_file <- args[2]
+refs_file     <- args[3]
+metadata_file <- args[4]
 
 #---- VERSION ----#
-if(cluster_refs_file == "version"){
+if(input_qc_file == "version"){
   cat(version, sep = "\n")
   quit(status=0)
 }
@@ -23,154 +20,118 @@ if(cluster_refs_file == "version"){
 #---- LIBRARIES ----#
 library(tidyverse)
 
-#---- FUNCTIONS ----#
-basename_fa <- function(path){
-    result <- basename(path) %>%
-      str_remove_all(pattern = ".fa.gz$")
-    return(result)
-    
-}
-
-#---- LOAD SUMMARY ---- #
-df.clusters_refs <- read_csv(cluster_refs_file)
-
-#---- CLASSIFY INPUT SEQS ----#
-# function for collapsing rows by group per column
-collapse_column <- function(col, df){
-    res <- df[,c("cluster",col)] %>%
-      rename(original = 2) %>%
-      group_by(cluster) %>%
-      mutate(collapsed = case_when( is.numeric(original) ~ paste0(min(original)," - ",max(original)),
-                                    TRUE ~ paste(unique(original), collapse = "; "))) %>%
-      select(cluster, collapsed) %>%
-      unique() %>%
-      ungroup()
-    colnames(res) <- c("cluster",col)
-    return(res)
-}
-# load raw sequences
-df.raw_seqs <- read_tsv(raw_seqs_file, col_names = c("accession","bases")) %>%
-  mutate_all(as.character)
-print(df.raw_seqs)
-# load cleaned sequences
-df.clean_seqs <- read_tsv(clean_seqs_file, col_names = c("seq","bases")) %>%
-  mutate_all(as.character)
-# merge cluster info with clean sequences and then raw sequences
-df.meta <- read_csv(cluster_all_file) %>%
-  mutate_all(as.character) %>%
-  select(seq, cluster) %>%
-  full_join(df.clean_seqs, by = "seq") %>%
-  full_join(df.raw_seqs, by = "bases") %>%
-  drop_na(seq) %>%
-  mutate(cluster = case_when(is.na(cluster) ~ 'filtered sequences',
-                             TRUE ~ cluster))
-
+#---- LOAD DATA ---- #
+# required data
+df.qc       <- read_csv(input_qc_file)
+df.clusters <- read_csv(clusters_file)
+df.refs     <- read_csv(refs_file)
+# optional data
 if(file.exists(metadata_file)){
-  # load additional metdata & join
-  df.meta <- read_csv(metadata_file) %>%
-    right_join(df.meta, by = "accession")
-}
-meta.cols <- df.meta %>%
-  select(-seq, -cluster, -bases) %>%
-  colnames()
-df.meta <- lapply(meta.cols, FUN = collapse_column, df.meta) %>%
-  reduce(left_join, by = "cluster")
-
-print(data.frame(df.meta))
-
-#---- LOAD FASTANI AVA RESULTS & ADD MISSING ----#
-fastani_ava <- read_tsv(fastani_ava_file, col_names = c("query","ref","ani","mapped","total")) %>%
-  select(query, ref, ani) %>%
-  mutate(query = basename_fa(query),
-         ref = basename_fa(ref))
-# get list of pairwise comparisons, add back to fastani_ava, filter by taxon & segment, then calculate ID
-q_filt <- df.clusters_refs %>%
-  select(seq, taxon, segment, length) %>%
-  rename(query = seq)
-r_filt <- df.clusters_refs %>%
-  mutate(ref = seq,
-         staxon=taxon,
-         sseg=segment) %>%
-  select(ref, staxon, sseg)
-fastani_ava <- df.clusters_refs %>%
-  select(seq) %>%
-  mutate(query=seq,
-         tmp='this works') %>%
-  pivot_wider(names_from = "seq", values_from = "tmp" ) %>%
-  pivot_longer(names_to = "ref", values_to = "tmp", 2:ncol(.)) %>%
-  select(query, ref) %>%
-  full_join(fastani_ava, by = c("query", "ref")) %>%
-  full_join(q_filt, by = "query") %>%
-  full_join(r_filt, by = "ref") %>%
-  filter(taxon == staxon & segment == sseg) %>%
-  drop_na(query, ref) %>%
-  mutate_all(~replace(., is.na(.), 0)) %>%
-  select(-staxon, -sseg)
-write.csv(x=fastani_ava, file = "full-ani.csv", quote = F, row.names = F)
-#---- PLOT MATRIX ----#
-plot_matrix <- function(ts){
-  # subset datafralsme & create plot
-  df <- fastani_ava %>%
-    mutate(taxon_seg = paste(taxon,segment, sep = "-")) %>%
-    filter(taxon_seg == ts)
-  p <-ggplot(df, aes(x=query, y=ref, fill = ani))+
-      geom_tile()+
-      theme_bw()+
-      theme(axis.text.x = element_text(angle=90))
-  
-  n <- df$query %>% unique() %>% length()
-  if(n > 10){
-    dims <- n*0.5
-  }else{
-    dims <- 5
+  # expand accessions associated with each QC'd sequence
+  expandAccessions <- function(row, df){
+    df[row,]$accessions %>%
+      str_remove_all(pattern = "[\\[\\]]") %>%
+      str_split(pattern = ',') %>%
+      data.frame() %>%
+      rename(accession = 1) %>%
+      mutate(seq = df[row,]$seq) %>%
+      return()
   }
-  if(n<100){
-    ggsave(p, filename = paste0(ts,".jpg"), dpi = 300, height = dims, width = dims, limitsize = FALSE)
-  }else(cat("Matrix image not saved. Too many references!\n"))
-  
+  df.accessionKey <- do.call(rbind, lapply(1:nrow(df.qc), FUN = expandAccessions, df.qc))
+
+  # prepare metadata
+  df.meta <- read_csv(metadata_file) %>%
+    merge(df.accessionKey, by = 'accession') %>%
+    drop_na(accession) %>%
+    unique() %>%
+    ungroup() %>%
+    select(-taxon, -segment)
+}else{
+  df.meta <- data.frame(seq = df.qc$seq)
 }
 
-ts_list <- fastani_ava %>%
-  mutate(taxon_seg = paste(taxon,segment, sep = "-")) %>%
-  .$taxon_seg %>%
-  unique()
-dev_null <- lapply(ts_list, FUN = plot_matrix)
+#----- CLEAN DATA -----#
+df.qc <- df.qc %>%
+  select(seq, accessions, length) %>%
+  rename(input_lengths = length) %>% 
+  mutate_all(as.character)
+df.clusters <- df.clusters %>%
+  select(-taxon, -segment) %>% 
+  mutate_all(as.character)
+df.refs <- df.refs %>%
+  rename(n_qc = n) %>%
+  mutate_all(as.character)
+df.meta <- df.meta %>%
+  mutate_all(as.character)
 
-#---- SUMMARIZE FASTANI AVA FURTHER ----#
-fastani_ava <- fastani_ava %>%
-  filter(query != ref) %>%
-  group_by(query, taxon, segment) %>%
-  summarise(min_ani = round(min(ani), digits = 1), max_ani = round(max(ani), digits = 1)) %>%
-  mutate(min_ani = case_when(min_ani < 80 ~ '< 80',
-                             TRUE ~ as.character(min_ani)),
-         max_ani = case_when(max_ani < 80 ~ '< 80',
-                             TRUE ~ as.character(max_ani))) %>%
-  rename(seq = query) %>%
-  ungroup() %>%
-  select(-taxon, -segment)
 
-#---- JOIN FINAL DATASETS & SUMMARIZE ----#
-# Join data sources
-df.summary <- df.clusters_refs %>%
-  mutate_all(as.character) %>%
-  full_join(fastani_ava, by = "seq") %>%
-  full_join(df.meta, by = c("taxon","segment","cluster"))
-# update condensed
-taxon_val <- df.summary %>%
-  drop_na(taxon) %>%
-  slice(1) %>%
-  .$taxon
-segment_val <- df.summary %>%
-  drop_na(segment) %>%
-  slice(1) %>%
-  .$segment
-df.summary <- df.summary %>%
+#----- MERGE & CLEAN MORE -----#
+collapseCols <- function(data){
+    data <- data %>%
+      str_split(pattern = ", ") %>%
+      unlist() %>%
+      str_remove_all(pattern = '[\\[\\]]') %>%
+      unique()
+    data <- data[grep(pattern = '(null|NA)', data, invert = T)] %>%
+      paste(collapse = ', ')
+    return(paste0('[', data, ']'))
+}
+getRange <- function(data){
+  data <- str_split(data, pattern = ', ') %>%
+    unlist() %>%
+    str_remove_all(pattern = '[\\[\\]]') %>%
+    as.numeric()
+  if( length(data) > 1 ){
+    return(paste(min(data),max(data),sep=' - '))
+  }else{
+    return(as.character(data))
+  }
+}
+cleanBrackets <- function(data){
+  return(str_remove_all(data, pattern = '[\\[\\]]'))
+}
+countElements <- function(data){
+  data %>%
+    str_remove_all(pattern = '[\\[\\]]') %>%
+    str_split(pattern = ', ') %>%
+    unlist() %>%
+    length() %>%
+    return()
+}
+
+df.summary <- df.qc %>%
+  merge(df.meta, by = "seq") %>%
+  drop_na(seq) %>%
+  merge(df.clusters, by = 'seq') %>%
+  drop_na(seq) %>%
+  merge(df.refs, by = "cluster") %>%
   group_by(cluster) %>%
-  mutate(taxon = taxon_val,
-         segment = segment_val,
-         seq = case_when( is.na(seq) & ! is.na(cluster) ~ 'Condensed' ,
-                          TRUE ~ seq ),
-         n = case_when( seq == 'Condensed' ~ as.character(length(unlist(str_split(accession, pattern = '; ')))),
-                        TRUE ~ n )) %>%
-  ungroup()
-write.csv(x = df.summary, file = paste0(prefix,"-summary.csv"), quote = T, row.names = F)
+  unique() %>%
+  mutate_all(collapseCols) %>%
+  unique() %>%
+  mutate(input_lengths = getRange(input_lengths),
+         taxon         = cleanBrackets(taxon),
+         segment       = cleanBrackets(segment),
+         length        = cleanBrackets(length),
+         n_qc          = cleanBrackets(length),
+         cluster       = cleanBrackets(cluster),
+         ref           = cleanBrackets(ref),
+         n_raw         = countElements(accessions) ) %>%
+  drop_na(taxon)
+# reorder columns
+main_cols <- c('taxon','segment','ref','length','n_qc', 'n_raw', 'cluster', 'condensed')
+extra_cols <- df.summary %>%
+  select(-main_cols) %>%
+  colnames()
+df.summary <- df.summary %>%
+  select(main_cols, extra_cols)
+
+#----- WRITE TO FILE -----#
+write.csv(x = df.summary, file = 'summary.csv', quote = T, row.names = F)
+
+nrow(df.accessionKey)
+sum(df.summary$n_raw)
+
+
+
+

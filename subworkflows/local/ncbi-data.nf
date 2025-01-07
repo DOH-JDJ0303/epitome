@@ -2,15 +2,21 @@
 // Check input samplesheet and get read channels
 //
 
-include { NCBI_DATA  } from '../../modules/local/ncbi-data'
-include { SEQTK_NCBI } from '../../modules/local/seqtk_subseq'
+include { NCBI_DATA    } from '../../modules/local/ncbi-data'
+include { SEQTK_NCBI   } from '../../modules/local/seqtk_subseq'
+include { MERGE_INPUTS } from '../../modules/local/merge-inputs'
 
 workflow NCBI_DATA_SUBWF {
     take:
     ch_input // [ va(taxon), val(segment), path(assembly), ... ]
 
     main:
-
+    /*
+    =============================================================================================================================
+        GATHER DATA FROM NCBI
+    =============================================================================================================================
+    */
+    // MODULE: Gather NCBI data for taxon
     NCBI_DATA(
         ch_input.map{ it.taxon }.unique()
     )
@@ -50,6 +56,11 @@ workflow NCBI_DATA_SUBWF {
         .filter{ accession, main, other -> main }
         .map{ accession, main, other -> main + (other ? other : [ subtype: null, genotype: null, segment: null ]) }
         .set{ ch_ncbi_data }
+    /*
+    =============================================================================================================================
+        CLEAN UP SEGMENTS
+    =============================================================================================================================
+    */
     // Report the segment options per taxon (for troubleshooting purposes)
     ch_ncbi_data
         .filter{ it.segment }
@@ -66,6 +77,7 @@ workflow NCBI_DATA_SUBWF {
                                                 }
                 [ it.taxon, segmentOptions ]
          }
+        .unique()
         .set{ ch_segmentOptions }
     // Standardize segment names based on supplied synonyms
     ch_ncbi_data
@@ -92,7 +104,12 @@ workflow NCBI_DATA_SUBWF {
                                       [ taxon: taxon, segment: segment, file: fwork ]
         }
         .set{ch_ncbi_data_file}
-     // Combine data with sequences
+    /*
+    =============================================================================================================================
+        PARSE SEQUENCES BY TAXON AND SEGMENT
+    =============================================================================================================================
+    */
+    // Combine data with sequences
     SEQTK_NCBI(
         NCBI_DATA
             .out
@@ -103,46 +120,32 @@ workflow NCBI_DATA_SUBWF {
         .out
         .sequences
         .join(ch_ncbi_data_file.map{ [ it.taxon, it.segment, it.file ] }, by: [0,1])
-        .map{ taxon, segment, assembly, length, metadata -> [ taxon: taxon, segment: segment, assembly: assembly, length: length, metadata: metadata ] }
+        .map{ taxon, segment, assembly, metadata -> [ taxon: taxon, segment: segment, assembly: assembly, metadata: metadata ] }
         .set{ch_input_ncbi}
-
+    /*
+    =============================================================================================================================
+        MERGE METADATA
+    =============================================================================================================================
+    */
     // Merge inputs (from NCBI and from the user)
-    ch_input_ncbi
-        .concat(ch_input.filter{ it.assembly })
-        .map{ [ it.taxon, it.segment, it ] }
-        .groupTuple(by: [0,1])
-        .set{ ch_input }
-    // Merge assembly file
-    ch_input
-        .map{ mergeAssembly(it) }
-        .set{ ch_merged_assembly }
-    // Merge metadata file
-    ch_input
-        .map{ taxon, segement, data -> [ taxon, segement, data.metadata ] }
-        .transpose()
-        .splitCsv(header: true, quote: '"', elem: 2)
-        .groupTuple(by: [0,1])
-        .map{ taxon, segment, data -> def table = channelToTable(data)
-                                      def fwork = file(workflow.workDir).resolve("${taxon}-${segment}-metadata.csv")
-                                      def fres  = file(params.outdir).resolve(taxon).resolve(segment).resolve("metadata").resolve('metadata.all.csv')
-                                      fwork.text = table
-                                      fwork.copyTo(fres)
-                                      [ taxon, segment, fwork ]
-        }
-        .set{ch_merged_metadata}
-    // Combine
-    ch_input
-        .map{ taxon, segment, data -> [ taxon, segment, data['length'][0] ] }
-        .join(ch_merged_assembly, by: [0,1])
-        .join(ch_merged_metadata, by: [0,1])
-        .map{ taxon, segment, length, assembly, metadata -> [ taxon: taxon, segment: segment, length: length, assembly: assembly, metadata: metadata ] }
-        .set{ ch_input }
-
+    MERGE_INPUTS (
+        ch_input_ncbi
+            .map{ it } 
+            .concat(ch_input.filter{ it.segment && it.assembly }.map{ it })
+            .map{ [ it.taxon, it.segment, it.assembly, it.metadata ] }
+            .groupTuple(by: [0,1])
+            .map{ taxon, segment, assembly, metadata -> [ taxon, segment, assembly, metadata ] }
+    )
 
     emit:
-    input = ch_input
+    input = MERGE_INPUTS.out.merged.map{ taxon, segment, assembly, metadata -> [ taxon: taxon, segment: segment, assembly: assembly, metadata: metadata ] }
 }
 
+/*
+=============================================================================================================================
+    FUNCTIONS
+=============================================================================================================================
+*/
 def channelToTable ( data ){
     // Gather all keys
     def allKeys = []
@@ -160,8 +163,7 @@ def formatTaxonData (row) {
 
     def result = [ taxon: row[0], 
                    accession: data.accession, 
-                   length: data.length, 
-                   collectionDate: data.containsKey('isolate') ? ( data.isolate.containsKey('collectionDate') ? data.location.collectionDate : null ) : null, 
+                   collectionDate: data.containsKey('isolate') ? ( data.isolate.containsKey('collectionDate') ? data.isolate.collectionDate : null ) : null, 
                    geographicRegion: data.containsKey('location') ? ( data.location.containsKey('geographicRegion') ? data.location.geographicRegion : null ) : null,
                    organismName_host: data.containsKey('host') ? ( data.host.containsKey('organismName') ? data.host.organismName : null ) : null,
                    organismName_virus: data.virus.organismName.split(' ').findAll{ ! it.contains('/') }.join(' '),
@@ -193,24 +195,4 @@ def fixSegmentSynonyms(row){
     }
 
     return [ taxon, data ]
-}
-
-def mergeAssembly (row){
-    // Define inputs
-    def taxon   = row[0]
-    def segment = row[1] 
-    def data    = row[2]
-
-    // Combine assembly files
-    def assembly_file = data.assembly[0]
-    if(data.assembly.size() > 1){
-        def assembly_ext = data.assembly.extension.toList().unique()
-        if(assembly_ext.size() > 1){ exit 1, "Can't combine assembly inputs for ${taxon} becuase they are in different formats." }
-        assembly_file = file(workflow.workDir).resolve("${taxon}-${segment}-assembly.merged.${assembly_ext == 'gz' ? '.fa.gz' : '.fa'}")
-        def assembly_content = []
-        data.assembly.each{ assembly_content = assembly_content + [ file(it).text ] }
-        assembly_file.text = assembly_content.join('\n')
-    }
-    
-    return [ taxon, segment, assembly_file ]
 }

@@ -1,6 +1,5 @@
 #!/usr/bin/env Rscript
 
-#!/usr/bin/env Rscript
 version <- "1.0"
 
 # cluster.R

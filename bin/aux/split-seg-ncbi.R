@@ -5,7 +5,7 @@ args <- commandArgs(trailingOnly=T)
 meta_path <- args[1]
 seqs_path <- args[2]
 
-meta <-read_csv(meta_path)
+meta <- read_csv(meta_path)
 seqs <- readDNAStringSet(seqs_path)
 
 filename.base <- basename(seqs_path) %>%

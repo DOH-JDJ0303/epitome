@@ -5,12 +5,18 @@
 SEQS=$1
 
 BN=$(basename ${SEQS%.*})
+if [[ "${SEQS: -2}" == '.gz' ]]
+then
+    CAT='zcat'
+else
+    CAT='cat'
+fi
 
-cat ${SEQS} \
+${CAT} ${SEQS} \
     | sed 's/>.*$/@&@/g' \
     | tr -d '\n' \
     | tr '@' '\n' \
     | tail -n +2  \
     | paste - - \
     | tr '|' '\t' \
-    | awk -v bn="${BN}" '{print $1"\n"$6 >> bn"_seg-"$5"_"$4".fa" }'
+    | awk -v bn="${BN}" '{print $2"\n"$6 >> bn"_seg-"$5"_"$4".fa" }'

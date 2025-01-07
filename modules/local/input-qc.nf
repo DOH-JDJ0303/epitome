@@ -4,37 +4,35 @@ process INPUT_QC {
     stageInMode 'copy'
 
     input:
-    tuple val(taxa), val(segment), path(sequences), val(expected_length)
+    tuple val(taxon), val(segment), path(sequences)
 
     output:
-    tuple val(taxa), val(segment), path("${prefix}.top.fa"), path("${prefix}.remainder.fa"), env(remainder_count), emit: seqs
-    tuple val(taxa), val(segment), path("${prefix}.all.fa"),                                                       emit: all
-    path "${prefix}-qc-summary.csv",                                                                               emit: summary
-    path "versions.yml",                                                                                           emit: versions
+    tuple val(taxon), val(segment), path("${prefix}.all.fa.gz"), path("${prefix}.top.fa.gz"), path("${prefix}.remainder.fa.gz"), env(STATUS), emit: seqs
+    tuple val(taxon), val(segment), path("${prefix}.qc.csv"),                                                                                 emit: summary
+    path "versions.yml",                                                                                                                      emit: versions
 
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
-    prefix = "${taxa}-${segment}"
+    prefix = "${taxon}-${segment}"
+
     """
-    seqs=${sequences}
-    # check if file is compressed
-    if [[ "${sequences}" == *".gz" ]];
+    # decompress FASTA file, if needed
+    gzip -d ${sequences} || true
+    # gather metrics
+    input-qc.R "${taxon}" "${segment}" "${sequences.name.replaceAll(/\.gz$/,'')}" "${params.amb_threshold}" "${params.len_threshold}" "${params.max_cluster}"
+    gzip *.fa
+    # check for top and remainder files
+    if [ ! -e "${prefix}.top.fa.gz" ]
     then
-        gzip -d ${sequences}
-        seqs=\${seqs%.gz}
+        STATUS=null
+        touch ${prefix}.top.fa.gz ${prefix}.remainder.fa.gz
+    else
+        STATUS=subsampled
     fi
-    # filter sequences
-    input-qc.sh \${seqs} ${prefix} "${expected_length}" "${params.len_threshold}" "${params.amb_threshold}" "${params.max_cluster}"
-
-    cat ${prefix}.top.fa ${prefix}.remainder.fa > ${prefix}.all.fa
-
-    # count remainder
-    remainder_count=\$(cat ${prefix}.remainder.fa | paste - - | wc -l)
-
-    # something about the normal way of getting version info messes with the creations of .command.env
-    echo -e "\\"${task.process}\\":\\n    input-qc.sh: \$(input-qc.sh version)" > versions.yml
+    # odd stuff going on with versioning
+    echo -e "\\"${task.process}\\":\\n    input-qc.R: \$(input-qc.R version)" > versions.yml
     """
 }

@@ -30,7 +30,7 @@ process NCBI_DATA {
     datasets summary taxonomy taxon ${taxon} --rank species > ncbi-taxids.json
 
     # Download additional details (those not included with NCBI Datasets)
-    esearch -db nucleotide -query '${taxon}[Organism] AND complete[Title]' | \
+    esearch -db nucleotide -query '${taxon}[Organism] AND "complete sequence"[Title]' | \
        efetch -format docsum -mode json | \
        jq -r '.result | .[] | [.accessionversion, .subtype, .subname]? | @csv' \
        > ncbi-subtype.csv
