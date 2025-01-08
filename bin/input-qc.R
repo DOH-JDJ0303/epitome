@@ -37,7 +37,7 @@ df.seqs <- data.frame(accession = str_remove(names(seqs), pattern = "\\s.*"), le
 # Consolidate sequences
 df.seqs <- df.seqs %>%
   group_by(seqString, length) %>%
-  summarise(accessions = paste0('[',paste(accession, collapse = ','),']')) %>%
+  reframe(accessions = paste0('[',paste(accession, collapse = '; '),']')) %>%
   ungroup()
 # Gather metrics
 legalBases <- '[-ATCGRYSWKMBDHVN]'
@@ -50,14 +50,17 @@ filterTest <- function(test){
     }
 }
 df.seqs <- df.seqs %>%
-  mutate(seq                = row_number(),
-         illegalBases       = str_remove_all(seqString, pattern = legalBases ),
+  mutate(seq = row_number()) %>%
+  group_by(seqString) %>%
+  mutate(illegalBases       = str_remove_all(seqString, pattern = legalBases ),
          ambRatio           = str_count(seqString, 'N') / length,
          filter_illegalBases = nchar(illegalBases) > 0, 
          filter_ambRatio    = ambRatio > amb_thresh, 
          filter_length      = sum(length >= median.length*(1+len_thresh) || length <= median.length*(1-len_thresh)) > 0,
          filters            = paste0('[illegalBases: ',filterTest(filter_illegalBases),', ambRatio: ',filterTest(filter_ambRatio),', lenght: ',filterTest(filter_length),']')
-         )
+         ) %>%
+  ungroup()
+
 
 # Save passing sequences to file
 ## function for saving fasta file
@@ -82,10 +85,10 @@ if( nrow(df.seqs.pass) > max_cluster ){
     saveFasta(df.top, paste0(file.basename,'.top.fa'))
     ## get remainder & save
     df.remainder <- df.seqs.pass[max_cluster+1:nrow(df.seqs.pass),]
-    saveFasta(df.top, paste0(file.basename,'.remainder.fa'))
+    saveFasta(df.remainder, paste0(file.basename,'.remainder.fa'))
 }
 
 # Save metadata file
-metadata <- df.seqs %>%
-  select(-filter_illegalBases, -filter_ambRatio, -filter_length)
+metadata <- df.seqs #%>%
+  # select(-filter_illegalBases, -filter_ambRatio, -filter_length)
 write.csv(x = metadata, file = paste0(file.basename,'.qc.csv'), quote = T, row.names = T)

@@ -3,9 +3,8 @@ FROM ubuntu:jammy
 
 # metadata
 LABEL base.image="ubuntu:jammy"
-LABEL dockerfile.version="2"
 LABEL software="EPITOME"
-LABEL software.version="v1.0.0"
+LABEL software.version="v1.5.0"
 LABEL description="Basic Linux for Running EPITOME Scripts"
 LABEL website="https://github.com/DOH-JDJ0303/bigbacter-nf"
 LABEL license="Apache 2.0"
@@ -16,8 +15,10 @@ LABEL maintainer.email="jared.johnson@doh.wa.gov"
 ENV DEBIAN_FRONTEND=noninteractive
 
 # install dependencies
-RUN apt-get update && apt-get -y --no-install-recommends install \
+RUN apt update && \
+    apt -y --no-install-recommends install \
     ca-certificates \
+    software-properties-common \
     libssl-dev \
     zlib1g-dev \
     libbz2-dev \
@@ -38,18 +39,27 @@ RUN apt-get update && apt-get -y --no-install-recommends install \
     libffi-dev \
     liblzma-dev \
     build-essential \
+    dirmngr \
+    gpg-agent
+
+RUN add-apt-repository "deb https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/" && \
+    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys E298A3A825C0D65DFD57CBB651716619E084DAB9 && \
+    apt update
+
+RUN apt -y --no-install-recommends install \
     bc \
     unzip \
     tar \
     gzip \
     curl \
     wget \
-    r-base \
-    r-base-dev \
-    bzip2 && \
+    bzip2 \
+    r-base=4.4.2-1.2204.0 \
+    r-base-dev=4.4.2-1.2204.0 \
+    r-recommended=4.4.2-1.2204.0 && \
     apt-get autoclean && \
     rm -rf /var/lib/apt/lists/*
     
-# required R packages
+# R packages
 RUN R -e "install.packages(c('tidyverse', 'phangorn','BiocManager', 'remotes'), repos='https://cran.rstudio.com/')"
-RUN R -e "BiocManager::install('treeio'); remotes::install_github('YuLab-SMU/ggtree')"
+RUN R -e "BiocManager::install('treeio'); BiocManager::install('Biostrings'); BiocManager::install('ggtree')"

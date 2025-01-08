@@ -42,6 +42,7 @@ include { ASSIGN_REMAINDER             } from '../modules/local/assign-remainder
 include { SEQTK_LOOSEENDS              } from '../modules/local/seqtk_subseq'
 include { MASH_TOP as MASH_LOOSEENDS   } from '../modules/local/mash'
 include { CLUSTER as CLUSTER_LOOSEENDS } from '../modules/local/cluster'
+include { MERGE_CLUSTERS               } from '../modules/local/merge-clusters'
 include { SEQTK_SUBSEQ                 } from '../modules/local/seqtk_subseq'
 include { MAFFT                        } from '../modules/local/mafft'
 include { CONSENSUS                    } from '../modules/local/consensus'
@@ -150,14 +151,6 @@ workflow EPITOME {
     )
     ch_versions = ch_versions.mix(CLUSTER_MAIN.out.versions.first())
 
-    // Set main cluster channel
-    CLUSTER_MAIN
-        .out
-        .results
-        .map{ taxon, segment, results -> results }
-        .splitCsv(header: true, quote: '"')
-        .set{ ch_cluster_main }
-
     /*
     =============================================================================================================================
         CLUSTER SEQUENCES: ASSIGN REMAINING USING SUBSET CLASSIFIER
@@ -175,14 +168,6 @@ workflow EPITOME {
         MASH_REMAINDER.out.results
     )
     ch_versions = ch_versions.mix(ASSIGN_REMAINDER.out.versions.first())
-
-    // Set assigned cluster channel
-    ASSIGN_REMAINDER
-        .out
-        .assigned
-        .map{ taxon, segment, results -> results }
-        .splitCsv( header: true, quote: '"' )
-        .set{ ch_cluster_assigned }
 
     /*
     =============================================================================================================================
@@ -212,49 +197,25 @@ workflow EPITOME {
     )
     ch_versions = ch_versions.mix(CLUSTER_LOOSEENDS.out.versions.first())
 
-    // Set loose-ends cluster channel
-    CLUSTER_LOOSEENDS
-        .out
-        .results
-        .map{ taxon, segment, results -> results }
-        .splitCsv( header: true, quote: '"' )
-        .set{ ch_cluster_looseends }
-
     /*
     =============================================================================================================================
         CLUSTER SEQUENCES: COMBINE ALL CLUSTERS
     =============================================================================================================================
     */
-    // Combine main cluster results and assigned cluster results
-    ch_cluster_main
-        .concat(ch_cluster_assigned)
+    MERGE_CLUSTERS (
+        CLUSTER_MAIN
+            .out
+            .results
+            .join(ASSIGN_REMAINDER.out.assigned, by: [0,1], remainder: true)
+            .join(CLUSTER_LOOSEENDS.out.results, by: [0,1], remainder: true)
+            .map{ taxon, segment, top, assigned, remainder -> [ taxon, segment, top, assigned ? assigned : [], remainder ? remainder : [] ] }
+    )
+    MERGE_CLUSTERS
+        .out
+        .merged
+        .map{ taxon, cluster, file -> file }
+        .splitCsv(header: true, quote: '"')
         .set{ ch_clusters }
-    // Adjust loose-end cluster numbers based on the main clustering numbers
-    ch_clusters
-        .map{ [ it.taxon, it.segment, it ] }
-        .groupTuple(by: [0,1])
-        .map{ taxon, segment, data -> [ taxon, segment, data.max{ it.cluster }.cluster ] }
-        .join( ch_cluster_looseends.map{ [ it.taxon, it.segment, it ] }.groupTuple(by: [0,1]), by: [0,1] )
-        .transpose()
-        .map{ taxon, segment, max_cluster, it -> it.cluster = it.cluster.toInteger() + max_cluster.toInteger()
-                                                it }
-        .concat(ch_clusters)
-        .map{ it.cluster = it.cluster.toString()
-              it }
-        .set{ ch_clusters }
-
-    // Save to file
-    ch_clusters
-        .map{ [ it.taxon, it.segment, it ] }
-        .groupTuple(by: [0,1])
-        .map{ taxon, segment, data -> def table = channelToTable(data)
-                                      def fwork = file(workflow.workDir).resolve("${taxon}-${segment}-clusters.csv")
-                                      def fres  = file(params.outdir).resolve(taxon).resolve(segment).resolve('clusters').resolve("clusters.all.csv")
-                                      fwork.text = table
-                                      fwork.copyTo(fres)
-                                      [ taxon: taxon, segment: segment, file: fwork ]
-        }
-        .set{ ch_clusters_file }
     // MODULE: Split clusters into multi-fasta files
     SEQTK_SUBSEQ(
         ch_clusters
@@ -317,7 +278,7 @@ workflow EPITOME {
             .out
             .dist
             .join(ch_consensus, by: [0,1])
-            .join(ch_clusters_file.map{ [ it.taxon, it.segment, it.file ] }, by: [0,1])
+            .join(MERGE_CLUSTERS.out.merged, by: [0,1])
     )
     ch_versions = ch_versions.mix(CONDENSE.out.versions.first())
 
@@ -330,23 +291,10 @@ workflow EPITOME {
         INPUT_QC
             .out
             .summary
-            .join(ch_clusters_file.map{ [ it.taxon, it.segment, it.file ] }, by: [0,1])
+            .join(MERGE_CLUSTERS.out.merged, by: [0,1])
             .join(CONDENSE.out.results.map{ taxon, segment, summary, assembly -> [ taxon, segment, summary ] }, by: [0,1])
             .join( ch_input.map{ [ it.taxon, it.segment, it.metadata ] }, by: [0,1] )
     )
-
-    // MODULE: Export reference samplesheet for VAPER
-    CONDENSE
-        .out
-        .results
-        .map{ taxon, segment, summary, assembly -> [ taxa: taxon, segment: segment, assembly: file(params.outdir).resolve(taxon).resolve(segment).resolve('consensus').resolve("${assembly.name}.fa.gz") ] }
-        .collect()
-        .combine(ch_timestamp)
-        .map{ data, timestamp -> def table = channelToTable(data) 
-                                 file(workflow.workDir).resolve("${timestamp}-epitome.csv").text = table
-        }
-
-    
 
     /*
     =============================================================================================================================

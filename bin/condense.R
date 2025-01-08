@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-version <- "1.0"
+version <- "1.1"
 
 # condense.R
 # Author: Jared Johnson, jared.johnson@doh.wa.gov
@@ -47,7 +47,6 @@ if(nrow(clusters.df) > 1){
     column_to_rownames(var="ID1") %>%
     as.matrix() %>%
     as.dist()
-
   #---- HIERARCHICAL CLUSTER ----#
   # create tree
   tree <- hclust(dist.mat, method = "complete") %>%
@@ -72,6 +71,7 @@ if(nrow(clusters.df) > 1){
     group_by(cluster2) %>%
     mutate(condensed = case_when(n() > 1 ~ paste0('[',paste(cluster, collapse = ","),']'),
                                  TRUE ~ '[]'))
+  #---- SELECT BEST REFERENCE FOR EACH CLUSTER ----#
   select.refs <- clusters.refs.df %>%
     filter(!(n < 10 & n() > 1)) %>%
     filter(length == max(length)) %>%
@@ -79,18 +79,49 @@ if(nrow(clusters.df) > 1){
     slice(1) %>%
     ungroup() %>%
     select(ref,taxon,segment,cluster,n,condensed,length)
-  clusters.refs.df <- clusters.refs.df %>%
-    filter(!(ref %in% select.refs$ref)) %>%
-    mutate(ref = 'condensed') %>%
+  #----- NEXT CLOSEST REFERENCE -----#
+  # select references - considers only other selected references
+  next_closest <- dist.df %>%
+    filter(ID1 != ID2) %>%
+    filter(ID1 %in% select.refs$ref) %>%
+    filter(ID2 %in% select.refs$ref) %>%
+    drop_na() %>%
+    group_by(ID1) %>%
+    filter(DIST == min(DIST,na.rm = T)) %>%
+    reframe(next_closest_ani = round(100*(1-DIST)), next_closest_ref = paste0('[',paste(ID2, collapse = '; '),']')) %>%
     ungroup() %>%
-    select(ref,taxon,segment,cluster,n,condensed,length) %>%
-    rbind(select.refs)
+    rename(ref = ID1)
+  # condensed references - considered select references
+  if(nrow(select.refs) != nrow(clusters.refs.df)){
+    next_closest <- dist.df %>%
+      filter(ID1 != ID2) %>%
+      filter(!(ID1 %in% select.refs$ref)) %>%
+      filter(ID2 %in% select.refs$ref) %>%
+      drop_na() %>%
+      group_by(ID1) %>%
+      filter(DIST == min(DIST,na.rm = T)) %>%
+      reframe(next_closest_ani = round(100*(1-DIST)), next_closest_ref = paste0('[',paste(ID2, collapse = ', '),']')) %>%
+      ungroup() %>%
+      rename(ref = ID1) %>%
+      rbind(next_closest)
+  }
+  # merge
+  clusters.refs.df <- clusters.refs.df %>%
+    merge(next_closest, by = "ref")
+  #---- ASSIGN OTHER REFERENCES AS CONDENSED ----#
+  clusters.refs.df <- clusters.refs.df %>%
+    mutate(ref = case_when(!(ref %in% select.refs$ref) ~ 'condensed',
+                           TRUE ~ ref )) %>%
+    select(ref,taxon,segment,cluster,n,condensed,length,next_closest_ani,next_closest_ref) %>%
+    unique()
+
 }else{
   clusters.refs.df <- clusters.df %>%
     left_join(len.df, by = "ref") %>%
     mutate(condensed = '[]') %>%
     select(ref,taxon,segment,cluster,n,condensed,length)
 }
+
 #----- SAVE OUTPUT -----#
 write.csv(x= clusters.refs.df, file = paste0(file.base,".condensed.csv"), row.names = F)
 

@@ -20,12 +20,15 @@ process CONDENSE {
     # get seq lengths
     zcat ${consensus} | paste - - | tr -d '>' | sed 's/.fa//g' | awk -v OFS=',' '{print \$1,length(\$2)}' > lengths.csv
 
+    # extract distances
+    zcat ${dist} > dist.txt
+
     # run script
-    condense.R ${dist} lengths.csv ${clusters} "${taxa}" "${segment}" ${params.dist_threshold}
+    condense.R dist.txt lengths.csv ${clusters} "${taxa}" "${segment}" ${params.dist_threshold}
 
     # remove sequences that will not be retained
     mkdir tmp
-    for s in \$(cat ${prefix}.condensed.csv | tr -d '"' | tail -n +2 | awk -v FS=',' '\$1 != "condensed" {print \$1}')
+    for s in \$(cat ${prefix}.condensed.csv | tr -d '"' | tail -n +2 | awk -v FS=',' '\$1 != "condensed" {print \$1}' | uniq)
     do
         mv \${s}.fa.gz tmp/
     done
