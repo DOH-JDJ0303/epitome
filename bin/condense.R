@@ -24,12 +24,12 @@ library(tidyverse)
 library(ggtree)
 library(ape)
 
-file.base <- paste(taxon_name,segment_name,sep="-")
+file.base <- paste(str_replace_all(taxon_name, pattern = ' ', replacement = '_'),segment_name,sep="-")
 
 #---- LOAD CLUSTER SET & GET COUNT ----#
 clusters.df <- read_csv(clusters_path) %>%
   filter(taxon == taxon_name & segment == segment_name) %>%
-  mutate(ref = paste(taxon,segment,cluster,sep = "-")) %>%
+  mutate(ref = paste(str_replace_all(taxon,pattern = ' ', replacement = '_'),segment,cluster,sep = "-")) %>%
   group_by(ref,taxon,segment,cluster) %>%
   count()
 
@@ -70,7 +70,8 @@ if(nrow(clusters.df) > 1){
     left_join(len.df, by = "ref") %>%
     group_by(cluster2) %>%
     mutate(condensed = case_when(n() > 1 ~ paste0('[',paste(cluster, collapse = ","),']'),
-                                 TRUE ~ '[]'))
+                                 TRUE ~ '[]')) %>%
+    ungroup()
   #---- SELECT BEST REFERENCE FOR EACH CLUSTER ----#
   select.refs <- clusters.refs.df %>%
     filter(!(n < 10 & n() > 1)) %>%
@@ -91,7 +92,7 @@ if(nrow(clusters.df) > 1){
     reframe(next_closest_ani = round(100*(1-DIST)), next_closest_ref = paste0('[',paste(ID2, collapse = '; '),']')) %>%
     ungroup() %>%
     rename(ref = ID1)
-  # condensed references - considered select references
+  # condensed references - consider select references
   if(nrow(select.refs) != nrow(clusters.refs.df)){
     next_closest <- dist.df %>%
       filter(ID1 != ID2) %>%
@@ -107,7 +108,7 @@ if(nrow(clusters.df) > 1){
   }
   # merge
   clusters.refs.df <- clusters.refs.df %>%
-    merge(next_closest, by = "ref")
+    left_join(next_closest, by = "ref")
   #---- ASSIGN OTHER REFERENCES AS CONDENSED ----#
   clusters.refs.df <- clusters.refs.df %>%
     mutate(ref = case_when(!(ref %in% select.refs$ref) ~ 'condensed',

@@ -4,11 +4,11 @@ process CLUSTER {
     stageInMode 'copy'
 
     input:
-    tuple val(taxa), val(segment), path(dist)
+    tuple val(taxon), val(segment), path(dist)
     val iteration
 
     output:
-    tuple val(taxa), val(segment), path("*.csv"), emit: results
+    tuple val(taxon), val(segment), path("*.csv"), emit: results
     path "*.jpg",        emit: plot
     path "versions.yml", emit: versions
 
@@ -17,11 +17,11 @@ process CLUSTER {
     task.ext.when == null || task.ext.when
 
     script:
-    prefix = "${taxa}-${segment}"
+    prefix = "${taxon.replaceAll(' ','_')}-${segment}"
     """
     zcat ${dist} | cut -f 1,2,3 > dists.txt
     # run script
-    cluster.R dists.txt "${taxa}" "${segment}" "${iteration}" ${params.dist_threshold}
+    cluster.R dists.txt "${taxon}" "${segment}" "${iteration}" ${params.dist_threshold}
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

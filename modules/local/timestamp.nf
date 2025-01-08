@@ -1,6 +1,4 @@
 process TIMESTAMP {
-    container = 'docker.io/jdj0303/epitome-base:1.0.0'
-
     output:
     env timestamp, emit: timestamp
 

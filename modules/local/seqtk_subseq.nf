@@ -8,10 +8,10 @@ process SEQTK_NCBI {
         'quay.io/biocontainers/seqtk:1.4--he4a0461_1' }"
 
     input:
-    tuple val(taxa), path(contigs), val(segment), val(seqs)
+    tuple val(taxon), path(contigs), val(segment), val(seqs)
 
     output:
-    tuple val(taxa), val(segment), path("${prefix}.ncbi.fa.gz"), emit: sequences
+    tuple val(taxon), val(segment), path("${prefix}.ncbi.fa.gz"), emit: sequences
     path "versions.yml",                                         emit: versions
 
     when:
@@ -19,7 +19,7 @@ process SEQTK_NCBI {
 
     script:
     def args   = task.ext.args   ?: ''
-    prefix = "${taxa}-${segment}"
+    prefix = "${taxon.replaceAll(' ','_')}-${segment}"
     """
     seqtk \\
         subseq \\
@@ -43,10 +43,10 @@ process SEQTK_SUBSEQ {
         'quay.io/biocontainers/seqtk:1.4--he4a0461_1' }"
 
     input:
-    tuple val(taxa), val(segment), val(cluster), val(seqs), path(contigs)
+    tuple val(taxon), val(segment), val(cluster), val(seqs), path(contigs)
 
     output:
-    tuple val(taxa), val(segment), val(cluster), path("${prefix}.fa"), val("${seqs.size()}"), emit: sequences
+    tuple val(taxon), val(segment), val(cluster), path("${prefix}.fa"), val("${seqs.size()}"), emit: sequences
     path "versions.yml",                                                                  emit: versions
 
     when:
@@ -54,7 +54,7 @@ process SEQTK_SUBSEQ {
 
     script:
     def args   = task.ext.args   ?: ''
-    prefix = "${taxa}-${segment}-${cluster}"
+    prefix = "${taxon.replaceAll(' ','_')}-${segment}-${cluster}"
     """
     seqtk \\
         subseq \\
@@ -77,10 +77,10 @@ process SEQTK_LOOSEENDS {
         'quay.io/biocontainers/seqtk:1.4--he4a0461_1' }"
 
     input:
-    tuple val(taxa), val(segment), path(seq_list), path(sequences)
+    tuple val(taxon), val(segment), path(seq_list), path(sequences)
 
     output:
-    tuple val(taxa), val(segment), path("${prefix}-looseends.fa"), emit: sequences
+    tuple val(taxon), val(segment), path("${prefix}-looseends.fa"), emit: sequences
     path "versions.yml",                                           emit: versions
 
     when:
@@ -88,7 +88,7 @@ process SEQTK_LOOSEENDS {
 
     script:
     def args   = task.ext.args   ?: ''
-    prefix = "${taxa}-${segment}"
+    prefix = "${taxon.replaceAll(' ','_')}-${segment}"
     """
     seqtk \\
         subseq \\

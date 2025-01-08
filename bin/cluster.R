@@ -25,7 +25,7 @@ library(ggtree)
 library(ape)
 
 # set output file name
-file.name <- paste(taxon_name,segment_name,iteration,sep="-")
+file.name <- paste(str_replace_all(taxon_name, pattern = ' ', replacement = '_'),segment_name,iteration,sep="-")
 
 #---- LOAD PAIRWISE DISTANCES ----#
 dist.df <- read_tsv(dist_path, col_names = c("ID1","ID2","DIST")) %>%

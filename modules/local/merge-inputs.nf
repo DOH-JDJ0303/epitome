@@ -4,16 +4,16 @@ process MERGE_INPUTS {
     stageInMode 'copy'
 
     input:
-    tuple val(taxa), val(segment), path(assembly), path(metadata)
+    tuple val(taxon), val(segment), path(assembly), path(metadata)
 
     output:
-    tuple val(taxa), val(segment), path("${prefix}.assembly.fa.gz"), path("${prefix}.metadata.csv"), emit: merged
+    tuple val(taxon), val(segment), path("${prefix}.assembly.fa.gz"), path("${prefix}.metadata.csv"), emit: merged
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
-    prefix = "${taxa}-${segment}"
+    prefix = "${taxon.replaceAll(' ','_')}-${segment}"
     """
     # combine assembly files
     gzip ${assembly.join(' ')} || true

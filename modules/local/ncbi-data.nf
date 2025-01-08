@@ -19,7 +19,7 @@ process NCBI_DATA {
     args   = task.ext.args ?: ''
     """    
     # Download sequences & limited metadata
-    datasets download virus genome taxon ${taxon} ${args} && unzip ncbi_dataset.zip
+    datasets download virus genome taxon "${taxon}" ${args} && unzip ncbi_dataset.zip
     # compress sequence file
     gzip ncbi_dataset/data/genomic.fna
     # parse data into individual JSON files
@@ -27,7 +27,7 @@ process NCBI_DATA {
     awk '{print > "parsed/"NR".json"}' ncbi_dataset/data/data_report.jsonl
     
     # Download detailed taxonomy data
-    datasets summary taxonomy taxon ${taxon} --rank species > ncbi-taxids.json
+    datasets summary taxonomy taxon "${taxon}" --rank species > ncbi-taxids.json
 
     # Download additional details (those not included with NCBI Datasets)
     esearch -db nucleotide -query '${taxon}[Organism] AND "complete sequence"[Title]' | \

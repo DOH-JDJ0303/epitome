@@ -21,7 +21,7 @@ if(reps_path == "version"){
 }
 
 # set output file name
-file.name <- paste(taxon_name,segment_name,"assigned",sep="-")
+file.name <- paste(str_replace_all(taxon_name, pattern = ' ', replacement = '_'),segment_name,"assigned",sep="-")
 
 #---- LOAD INPUTS ----#
 df.reps <- read.csv(reps_path, header=F) %>%

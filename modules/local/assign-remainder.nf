@@ -4,11 +4,11 @@ process ASSIGN_REMAINDER {
     stageInMode 'copy'
 
     input:
-    tuple val(taxa), val(segment), path(reps), path(mash), path(all)
+    tuple val(taxon), val(segment), path(reps), path(mash), path(all)
 
     output:
-    tuple val(taxa), val(segment), path("${prefix}-assigned.csv"),                    emit: assigned
-    tuple val(taxa), val(segment), path("not-assigned.csv"), env(not_assigned_count), emit: not_assigned
+    tuple val(taxon), val(segment), path("${prefix}-assigned.csv"),                    emit: assigned
+    tuple val(taxon), val(segment), path("not-assigned.csv"), env(not_assigned_count), emit: not_assigned
     path "versions.yml",                                                              emit: versions
 
 
@@ -16,10 +16,10 @@ process ASSIGN_REMAINDER {
     task.ext.when == null || task.ext.when
 
     script:
-    prefix = "${taxa}-${segment}"
+    prefix = "${taxon.replaceAll(' ','_')}-${segment}"
     """
     # assign remainder
-    assign-remainder.R ${reps} ${mash} ${all} ${taxa} ${segment}
+    assign-remainder.R "${reps}" "${mash}" "${all}" "${taxon}" "${segment}"
     # get count of sequences not assigned
     not_assigned_count=\$(cat not-assigned.csv | wc -l)
 

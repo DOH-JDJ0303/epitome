@@ -7,6 +7,7 @@
 args <- commandArgs(trailingOnly=T)
 fasta_file    <- args[1]
 metadata_file <- args[2]
+taxon         <- args[3]
 
 #---- LIBRARY ----#
 library(tidyverse)
@@ -24,10 +25,11 @@ meta <- read_csv(metadata_file)
 filename.base <- basename(metadata_file) %>%
   str_remove(pattern = '\\.csv')
 segmentKey <- data.frame(segment_name = c("PB2","PB1","PA","HA","NP","NA","MP","NS"), segment = 1:8)
-select_cols <- c('geographicRegion','collectionDate','organismName_host','subtype','clade','lineage','HA_type','NA_type')
+select_cols <- c('taxon', 'geographicRegion','collectionDate','organismName_host','subtype','clade','lineage','HA_type','NA_type')
 meta <- meta %>%
   group_by(Isolate_Id) %>%
-  mutate(geographicRegion  = unlist(str_split(Location, ' / '))[1],
+  mutate(taxon             = taxon,
+         geographicRegion  = unlist(str_split(Location, ' / '))[1],
          collectionDate    = substr(Collection_Date, 1, 4),
          organismName_host = Host,
          subtype           = str_remove_all(Subtype, pattern = 'A( / )'),

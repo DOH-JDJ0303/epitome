@@ -3,23 +3,19 @@ process SUMMARY {
     tag "${prefix}"
 
     input:
-    tuple val(taxa), val(segment), path(input_qc), path(clusters), path(refs), path(metadata)
+    tuple val(taxon), val(segment), path(input_qc), path(clusters), path(refs), path(metadata)
 
     output:
-    tuple val(taxa), val(segment), path("${prefix}.summary_full.csv"),   emit: full
-    tuple val(taxa), val(segment), path("${prefix}.summary_simple.csv"), emit: simple
-    tuple val(taxa), val(segment), path("${prefix}.summary_taxon.csv"),  emit: taxon
-
-
-
+    tuple val(taxon), val(segment), path("${prefix}.summary_full.csv"),   emit: full
+    tuple val(taxon), val(segment), path("${prefix}.summary_simple.csv"), emit: simple
+    tuple val(taxon), val(segment), path("${prefix}.summary_taxon.csv"),  emit: taxon
     path "versions.yml", emit: versions
-
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
-    prefix = "${taxa}-${segment}"
+    prefix = "${taxon.replaceAll(' ','_')}-${segment}"
     """
     # run script
     summary.R "${input_qc}" "${clusters}" "${refs}" "${metadata}"

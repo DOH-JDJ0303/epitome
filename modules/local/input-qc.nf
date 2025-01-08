@@ -16,8 +16,7 @@ process INPUT_QC {
     task.ext.when == null || task.ext.when
 
     script:
-    prefix = "${taxon}-${segment}"
-
+    prefix = "${taxon.replaceAll(' ','_')}-${segment}"
     """
     # decompress FASTA file, if needed
     gzip -d ${sequences} || true

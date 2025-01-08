@@ -4,10 +4,10 @@ process CONDENSE {
     stageInMode 'copy'
 
     input:
-    tuple val(taxa), val(segment), path(dist), path(consensus), path(clusters)
+    tuple val(taxon), val(segment), path(dist), path(consensus), path(clusters)
 
     output:
-    tuple val(taxa), val(segment), path("${prefix}.condensed.csv"), path("*.fa.gz", includeInputs: true), emit: results
+    tuple val(taxon), val(segment), path("${prefix}.condensed.csv"), path("*.fa.gz", includeInputs: true), emit: results
     path "versions.yml",                                                                                  emit: versions
 
 
@@ -15,7 +15,7 @@ process CONDENSE {
     task.ext.when == null || task.ext.when
 
     script:
-    prefix = "${taxa}-${segment}"
+    prefix = "${taxon.replaceAll(' ','_')}-${segment}"
     """
     # get seq lengths
     zcat ${consensus} | paste - - | tr -d '>' | sed 's/.fa//g' | awk -v OFS=',' '{print \$1,length(\$2)}' > lengths.csv
@@ -24,7 +24,7 @@ process CONDENSE {
     zcat ${dist} > dist.txt
 
     # run script
-    condense.R dist.txt lengths.csv ${clusters} "${taxa}" "${segment}" ${params.dist_threshold}
+    condense.R dist.txt lengths.csv ${clusters} "${taxon}" "${segment}" ${params.dist_threshold}
 
     # remove sequences that will not be retained
     mkdir tmp

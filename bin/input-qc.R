@@ -26,7 +26,7 @@ library(Biostrings)
 
 #----- MAIN -----#
 # File basename
-file.basename <- paste(taxon,segment,sep='-')
+file.basename <- paste(str_replace_all(taxon, pattern = ' ', replacement = '_'), segment,sep='-')
 
 # Load sequences
 seqs <- readDNAStringSet(seqs_path)

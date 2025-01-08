@@ -1,5 +1,5 @@
 process MASH_TOP {
-    tag "${taxa}-${segment}"
+    tag "${taxon}-${segment}"
     label 'process_high'
     conda "bioconda::mash=2.3"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
@@ -7,10 +7,10 @@ process MASH_TOP {
         'quay.io/biocontainers/mash:2.3--he348c14_1' }"
 
     input:
-    tuple val(taxa), val(segment), path(sequences)
+    tuple val(taxon), val(segment), path(sequences)
 
     output:
-    tuple val(taxa), val(segment), path("${prefix}-dist.txt.gz"), emit: dist
+    tuple val(taxon), val(segment), path("${prefix}-dist.txt.gz"), emit: dist
     path "versions.yml",                                          emit: versions
 
     when:
@@ -18,8 +18,7 @@ process MASH_TOP {
 
     script:
     def args = task.ext.args ?: ''
-    prefix = "${taxa}-${segment}"
-
+    prefix = "${taxon.replaceAll(' ','_')}-${segment}"
     """
     cat ${sequences} > seqs.fa
     # create mash sketch
@@ -47,7 +46,7 @@ process MASH_TOP {
 }
 
 process MASH_REMAINDER {
-    tag "${taxa}-${segment}"
+    tag "${taxon}-${segment}"
     label 'process_high'
     conda "bioconda::mash=2.3"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
@@ -55,10 +54,10 @@ process MASH_REMAINDER {
         'quay.io/biocontainers/mash:2.3--he348c14_1' }"
 
     input:
-    tuple val(taxa), val(segment), path(top), path(remainder), path(clusters) 
+    tuple val(taxon), val(segment), path(top), path(remainder), path(clusters) 
 
     output:
-    tuple val(taxa), val(segment), path("reps.csv"), path("remainder-mash.csv"), path("remainder-list.csv"), emit: results
+    tuple val(taxon), val(segment), path("reps.csv"), path("remainder-mash.csv"), path("remainder-list.csv"), emit: results
     path "versions.yml",                                                                                     emit: versions
 
     when:
@@ -66,7 +65,7 @@ process MASH_REMAINDER {
 
     script:
     def args = task.ext.args ?: ''
-    prefix = "${taxa}-${segment}"
+    prefix = "${taxon}-${segment}"
 
     """
     assign-remainder.sh ${top} ${remainder} ${clusters} ${params.dist_threshold} $task.cpus
