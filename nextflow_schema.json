@@ -48,14 +48,28 @@
             "properties": {
                 "dist_threshold": {
                     "type": "number",
-                    "default": 0.15
+                    "default": 0.15,
+                    "description": "Target distance threshold (1-%ANI/100). It is often necessary to add approx. 0.03 to this value to reach the target."
+                },
+                "amb_threshold": {
+                    "type": "number",
+                    "default": 0.1,
+                    "description": "Maximum percent of bases that can be ambiguous (N) in an input sequence."
                 },
                 "len_threshold": {
                     "type": "number",
-                    "default": 0.25
+                    "default": 0.25,
+                    "description": "Maximum length difference (+/-) of an input sequence compared to the expected sequence size."
                 },
-                "seeds": {
-                    "type": "string"
+                "max_cluster": {
+                    "type": "integer",
+                    "default": 10000,
+                    "description": "Maximum number of sequences that will be included in the initial clustering step. Increasing this value may result in segmentation faults."
+                },
+                "ncbi": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Whether data should be pulled from NCBI."
                 }
             }
         },
@@ -304,11 +318,5 @@
         {
             "$ref": "#/definitions/generic_options"
         }
-    ],
-    "properties": {
-        "max_cluster": {
-            "type": "integer",
-            "default": 10000
-        }
-    }
+    ]
 }
