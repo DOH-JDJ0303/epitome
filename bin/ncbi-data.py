@@ -114,7 +114,7 @@ with open(args.subtype_file, 'r') as file:
 ## all accessions in the NCBI Datasets report
 resComplete = []
 segComplete = []
-targetKeys  = [ 'accession', 'geographicRegion', 'collectionDate', 'organismName_host', 'organismName_virus', 'species', 'subtype', 'genotype', 'serotype', 'lineage', 'clade', 'segment' ]
+targetKeys  = [ 'accession', 'geographicRegion', 'collectionDate', 'organismName_host', 'organismName_virus', 'species', 'subtype', 'genotype', 'serotype', 'lineage', 'clade', 'biotype', 'subgroup', 'group', 'type', 'segment' ]
 for acc in resReport.keys():
     if acc != 'none' and acc in resSubtype.keys():
         dictAll = resReport[acc] | resSubtype[acc] | {'accession': acc}
