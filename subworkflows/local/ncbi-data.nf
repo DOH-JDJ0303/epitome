@@ -173,7 +173,7 @@ def formatTaxonData (row) {
 }
 
 def formatSubtypeData (row) {
-    def target_keys = ['segment','subtype','genotype']
+    def target_keys = ['segment','subtype','genotype','serotype']
     def results     = [ accession: row[1][0] ]
     def keys        = row[1][1].split('\\|').toList()
     def values      = row[1][2].split('\\|').toList()
@@ -183,7 +183,6 @@ def formatSubtypeData (row) {
     target_keys.findAll{ ! results.keySet().contains(it) }.each{ results[it] = null }
 
     return  results.findAll { it -> ( ['accession'] + target_keys ).contains(it.key) }
-
 }
 
 def fixSegmentSynonyms(row){
