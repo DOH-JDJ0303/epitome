@@ -3,13 +3,13 @@ process NCBI_DATA {
     label 'process_low'
 
     input:
-    tuple val(taxon)
+    tuple val(taxon), val(segment_synonyms)
 
     output:
     tuple val(taxon), path("ncbi_dataset/data/genomic.fna.gz"), emit: genomic
-    tuple val(taxon), path("parsed/*.json"),                    emit: data_reports
-    tuple val(taxon), path("ncbi-taxids.json"),                 emit: taxids
-    tuple val(taxon), path("ncbi-subtype.csv"),                 emit: subtype
+    tuple val(taxon), path("ncbi-meta.complete.csv"),           emit: complete
+    tuple val(taxon), path("ncbi-meta.report-only.csv"),        emit: reportonly
+    tuple val(taxon), path("ncbi-meta.subtype-only.csv"),       emit: subtypeonly
     path "versions.yml",                                        emit: versions
 
     when:
@@ -18,22 +18,24 @@ process NCBI_DATA {
     script:
     args   = task.ext.args ?: ''
     """    
-    # Download sequences & limited metadata
+    #---- NCBI Datasets Genome -----#
+    # download
     datasets download virus genome taxon "${taxon}" ${args} && unzip ncbi_dataset.zip
     # compress sequence file
     gzip ncbi_dataset/data/genomic.fna
-    # parse data into individual JSON files
-    mkdir parsed
-    awk '{print > "parsed/"NR".json"}' ncbi_dataset/data/data_report.jsonl
     
+    #---- NCBI Datasets Taxon -----#
     # Download detailed taxonomy data
     datasets summary taxonomy taxon "${taxon}" --rank species > ncbi-taxids.json
-
+    
+    #---- NCBI Esearch -----#
     # Download additional details (those not included with NCBI Datasets)
     esearch -db nucleotide -query '${taxon}[Organism] AND "complete sequence"[Title]' | \
-       efetch -format docsum -mode json | \
-       jq -r '.result | .[] | [.accessionversion, .subtype, .subname]? | @csv' \
-       > ncbi-subtype.csv
+       efetch -format docsum -mode json \
+       > ncbi-subtype.json
+    
+    #---- COMBINE ----#
+    ncbi-data.py --segsyns "${segment_synonyms}"
 
     # version info
     cat <<-END_VERSIONS > versions.yml

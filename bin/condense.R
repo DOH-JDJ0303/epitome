@@ -74,6 +74,7 @@ if(nrow(clusters.df) > 1){
     ungroup()
   #---- SELECT BEST REFERENCE FOR EACH CLUSTER ----#
   select.refs <- clusters.refs.df %>%
+    group_by(cluster2) %>%
     filter(!(n < 10 & n() > 1)) %>%
     filter(length == max(length)) %>%
     filter(n() == max(n())) %>%

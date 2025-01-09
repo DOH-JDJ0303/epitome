@@ -178,7 +178,7 @@ n_raw <- df.summary %>%
   as.numeric() %>%
   sum()
 n_pass <- df.summary %>%
-  filter(!(assembly %in% c('condensed','failed_qc'))) %>%
+  filter(!(assembly %in% c('failed_qc'))) %>%
   .$n_raw %>%
   as.numeric() %>%
   sum()
