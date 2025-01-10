@@ -43,7 +43,7 @@ def write_dicts_to_csv(dicts, filename):
 
     # Write to CSV
     with open(filename, 'w', newline='') as file:
-        writer = csv.DictWriter(file, fieldnames=keys)
+        writer = csv.DictWriter(file, fieldnames=keys, quoting=csv.QUOTE_ALL)
         writer.writeheader()
         writer.writerows(dicts)
 

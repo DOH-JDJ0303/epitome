@@ -26,9 +26,10 @@ workflow NCBI_DATA_SUBWF {
     NCBI_DATA
       .out
       .complete
-      .splitCsv(header: true)
+      .splitCsv(header: true, quote: '"')
       .map{ taxon, data -> data + [ taxon: taxon ]}
       .set{ ch_ncbi_data }
+    ch_ncbi_data.filter{it.segment == null}.view()
     ch_ncbi_data
         .map{ [ it.taxon, it.segment, it ] }
         .groupTuple(by: [0,1])
