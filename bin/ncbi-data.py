@@ -14,6 +14,7 @@ parser.add_argument("--report", dest="report_file",  default="ncbi_dataset/data/
 parser.add_argument("--subtype", dest="subtype_file",  default="ncbi-subtype.json", help="Path to JSON file from esearch'")
 parser.add_argument("--taxids", dest="taxids_file",  default="ncbi-taxids.json", help="Path to JSON from 'datasets summary taxonomy taxon'")
 parser.add_argument("--segsyns", dest="seg_syns", default=argparse.SUPPRESS,  help="Segment synonyms.")
+parser.add_argument('--segmented', action='store_true', help='Segmented virus')
 args = parser.parse_args()
 
 #----- FUNCTIONS -----#
@@ -98,15 +99,20 @@ with open(args.subtype_file, 'r') as file:
                         for key in subtypeKeys:
                             rowSubtype[key] = subtypeValues[counter]
                             counter         += 1
-                    # update segment names based on supplied segment synonyms (if the are supplied)
-                    if 'segment' in rowSubtype.keys():
-                        segOpts.append(rowSubtype['segment'])
-                        if len(segSyns) > 0:
-                            for seg in segSyns.keys():
-                                rowSubtype['segment'] = seg if rowSubtype['segment'] in segSyns[seg] else rowSubtype['segment']
-                            rowSubtype['segment'] = rowSubtype['segment'] if rowSubtype['segment'] in segSyns.keys() else 'none'
+                    # assign segmented status
+                    if args.segmented:
+                        # update segment names based on supplied segment synonyms (if the are supplied)
+                        if 'segment' in rowSubtype.keys():
+                            segOpts.append(rowSubtype['segment'])
+                            if len(segSyns) > 0:
+                                for seg in segSyns.keys():
+                                    rowSubtype['segment'] = seg if rowSubtype['segment'] in segSyns[seg] else rowSubtype['segment']
+                                rowSubtype['segment'] = rowSubtype['segment'] if rowSubtype['segment'] in segSyns.keys() else 'none'
+                        else:
+                            rowSubtype['segment'] = 'none'
                     else:
-                        rowSubtype['segment'] = 'none'
+                        rowSubtype['segment'] = 'wg'
+                    # add to the list
                     resSubtype[ get_nested_value(meta[uid], ['accessionversion']) ] = rowSubtype
     print(f'Segment Options: {", ".join(set(segOpts))}')
 
@@ -125,15 +131,6 @@ for acc in resReport.keys():
     else:
         dictAll.update({ 'segment': 'none' })
     resComplete.append({key: dictAll[key] for key in targetKeys if key in dictAll})
-## determine if the organism is segmented & filter missing segment info
-counter = 0
-for row in resComplete:
-    if len(set(segComplete)) > 0 and resComplete[counter]['segment'] != 'none':
-        resComplete[counter] = resComplete[counter] | { 'segmented': 'true' }
-    else:
-        resComplete[counter]['segment'] = 'wg'
-        resComplete[counter] = resComplete[counter] | { 'segmented': 'false' }
-    counter              += 1
 ## accessions only in the NCBI Datasets report
 resReportOnly = []
 for acc in list(resReport.keys()):

@@ -3,7 +3,7 @@ process NCBI_DATA {
     label 'process_low'
 
     input:
-    tuple val(taxon), val(segment_synonyms)
+    tuple val(taxon), val(segment_synonyms), val(seg_status)
 
     output:
     tuple val(taxon), path("ncbi_dataset/data/genomic.fna.gz"), emit: genomic
@@ -35,7 +35,7 @@ process NCBI_DATA {
        > ncbi-subtype.json
     
     #---- COMBINE ----#
-    ncbi-data.py --segsyns "${segment_synonyms}"
+    ncbi-data.py --segsyns "${segment_synonyms}" ${seg_status == 'TRUE' ? '--segmented' : ''}
 
     # version info
     cat <<-END_VERSIONS > versions.yml

@@ -99,7 +99,8 @@ workflow EPITOME {
                 assembly: it.containsKey('assembly') ? ( it.assembly ? file(it.assembly, checkIfExists: true) : [] ) : [], 
                 metadata: it.containsKey('metadata') ? ( it.metadata ? file(it.metadata, checkIfExists: true) : [] ) : [],
                 segmentSynomyms: it.containsKey('segmentSynonyms') ? ( it.segmentSynonyms ? it.segmentSynonyms : null ) : null,
-                ] 
+                segmented: it.containsKey('segmented') ? ( it.segmented ? it.segmented : 'FALSE' ) : 'FALSE'
+                ]
                 }
         .set{ ch_input }
 
