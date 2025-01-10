@@ -123,6 +123,7 @@ if(nrow(dist.df) > 1){
     drop_na() %>%
     rename(seq = ID1) %>%
     mutate(seq = as.numeric(seq),
+      cluster = 1,
       taxon = taxon_name,
       segment = segment_name) %>%
   select(seq, taxon, segment, cluster)
