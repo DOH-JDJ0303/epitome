@@ -9,7 +9,7 @@ process CLUSTER {
 
     output:
     tuple val(taxon), val(segment), path("*.csv"), emit: results
-    path "*.jpg",        emit: plot
+    path "*.jpg",        emit: plot, optional: true
     path "versions.yml", emit: versions
 
 
