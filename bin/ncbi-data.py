@@ -114,7 +114,7 @@ with open(args.subtype_file, 'r') as file:
                         rowSubtype['segment'] = 'wg'
                     # add to the list
                     resSubtype[ get_nested_value(meta[uid], ['accessionversion']) ] = rowSubtype
-    print(f'Segment Options: {", ".join(set(segOpts))}')
+    print(f'Raw Segments: {", ".join(set(segOpts))}')
 
 # Combine datastreams
 ## all accessions in the NCBI Datasets report
@@ -126,11 +126,13 @@ for acc in resReport.keys():
         dictAll = resReport[acc] | resSubtype[acc] | {'accession': acc}
     else:
         dictAll = resReport[acc] | {'accession': acc}
+    if not args.segmented:
+        dictAll.update({ 'segment': 'wg' })
     if 'segment' in dictAll.keys():
-        segComplete.append(dictAll['segment'])
-    else:
-        dictAll.update({ 'segment': 'none' })
-    resComplete.append({key: dictAll[key] for key in targetKeys if key in dictAll})
+        if dictAll['segment'] != 'none':
+            segComplete.append(dictAll['segment'])
+            resComplete.append({key: dictAll[key] for key in targetKeys if key in dictAll})
+print(f'Final Segements: {" ".join(set(segComplete))}')
 ## accessions only in the NCBI Datasets report
 resReportOnly = []
 for acc in list(resReport.keys()):
