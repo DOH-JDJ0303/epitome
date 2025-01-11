@@ -11,6 +11,8 @@ workflow NCBI_DATA_SUBWF {
     ch_input // [ va(taxon), val(segment), path(assembly), ... ]
 
     main:
+    ch_versions = Channel.empty()
+
     /*
     =============================================================================================================================
         GATHER DATA FROM NCBI
@@ -73,7 +75,8 @@ workflow NCBI_DATA_SUBWF {
     )
 
     emit:
-    input = MERGE_INPUTS.out.merged.map{ taxon, segment, assembly, metadata -> [ taxon: taxon, segment: segment, assembly: assembly, metadata: metadata ] }
+    input    = MERGE_INPUTS.out.merged.map{ taxon, segment, assembly, metadata -> [ taxon: taxon, segment: segment, assembly: assembly, metadata: metadata ] }
+    versions = ch_versions
 }
 
 /*
