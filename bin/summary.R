@@ -22,27 +22,29 @@ library(tidyverse)
 
 #----- FUNCTIONS -----#
 # function for collapsing rows by column
-collapseCols <- function(data){
-    data <- data %>%
-      str_split(pattern = "; ") %>%
-      unlist() %>%
-      str_remove_all(pattern = '[\\[\\]]') %>%
-      unique()
-    data <- data[grep(pattern = '(null|NA)', data, invert = T)] %>%
-      paste(collapse = '; ')
-    return(paste0('[', data, ']'))
-}
-# function for get range from bracket list
-getRange <- function(data){
-  data <- str_split(data, pattern = ', ') %>%
-    unlist() %>%
+collapseCols <- function(val){
+  res <- val %>%
     str_remove_all(pattern = '[\\[\\]]') %>%
-    as.numeric()
-  if( length(data) > 1 ){
-    return(paste(min(data),max(data),sep=' - '))
+    str_split(pattern = '; ') %>%
+    unlist() %>%
+    data.frame() %>%
+    rename(var = 1) %>%
+    filter(!(var %in% c('','NA','none','null','NULL'))) %>%
+    drop_na(var) %>%
+    unique() %>%
+    .$var
+  if( length(res) == 0 ){
+    res <- ''
+  }else if( length(res) == 1 ){
+    res <- unlist(res)
+  }else if( any(!is.na(suppressWarnings(as.numeric(res)))) ){
+    # cat(paste0('\n',as.character(res),' is numeric!\n'))
+    res <- paste(min(as.numeric(res)),max(as.numeric(res)),sep=' - ')
   }else{
-    return(as.character(data))
+    # cat(paste0('\n',as.character(res),' is a character!\n'))
+    res <- paste0('[',paste(res, collapse = '; '),']')
   }
+  return(res)
 }
 # function for removing brackets
 cleanBrackets <- function(data){
@@ -123,29 +125,31 @@ df.summary <- df.accessionKey %>%
   mutate(cluster = case_when(is.na(cluster) & ! is.na(seq) ~ 'failed_qc',
                              TRUE ~ cluster),
          ref     = case_when(cluster == 'failed_qc' ~ 'failed_qc',
-                             TRUE ~ ref)) %>%
+                             TRUE ~ ref),
+         seq = paste0('seq',seq)) %>%
   drop_na(cluster) %>%
   group_by(cluster) %>%
   unique() %>%
-  mutate_all(collapseCols) %>%
+  mutate_at(vars(-group_cols()), collapseCols) %>%
   unique() %>%
-  mutate(input_lengths = getRange(input_lengths),
-         n_raw         = countElements(accessions) ) %>%
-  mutate_all(cleanBrackets) %>%
-  ungroup()
-# add missing taxon and segment info (for filtered sequences)
+  ungroup() %>%
+  mutate(n_raw = countElements(accessions),
+         seq = str_remove_all(seq, pattern = 'seq')) %>%
+  mutate_all(cleanBrackets)
+# fix any missing taxon and segment info
 taxonName <- df.summary %>%
+  filter(!(segment %in% c('','NA','none','null','NULL'))) %>%
   drop_na(taxon) %>%
+  slice(1) %>%
   .$taxon
 segmentName <- df.summary %>%
+  filter(!(segment %in% c('','NA','none','null','NULL'))) %>%
   drop_na(segment) %>%
   slice(1) %>%
   .$segment
 df.summary <- df.summary %>%
-  mutate(taxon   = case_when(taxon == 'NA' ~ taxonName,
-                             TRUE ~ taxon),
-         segment = case_when(segment == 'NA' ~ segmentName,
-                             TRUE ~ segment)) %>%
+  mutate(taxon   = taxonName,
+         segment = segmentName) %>%
   drop_na(taxon)
 # rename columns
 df.summary <- df.summary %>%

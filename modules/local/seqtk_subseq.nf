@@ -47,7 +47,7 @@ process SEQTK_SUBSEQ {
 
     output:
     tuple val(taxon), val(segment), val(cluster), path("${prefix}.fa"), val("${seqs.size()}"), emit: sequences
-    path "versions.yml",                                                                  emit: versions
+    path "versions.yml",                                                                       emit: versions
 
     when:
     task.ext.when == null || task.ext.when
@@ -56,11 +56,17 @@ process SEQTK_SUBSEQ {
     def args   = task.ext.args   ?: ''
     prefix = "${taxon.replaceAll(' ','_')}-${segment}-${cluster}"
     """
+    # extract sequences and then subsample if greater than 'max_cluster'
     seqtk \\
         subseq \\
         ${args} \\
         ${contigs} \\
-        <(echo "${seqs.join('\n')}") > ${prefix}.fa
+        <(echo "${seqs.join('\n')}") \\
+        | seqtk \\
+        sample \\
+        -s11 \\
+        - \\
+        ${params.max_align} > ${prefix}.fa
 
     # odd stuff going on with versioning
     echo -e "\\"${task.process}\\":\\n    seqtk: \$(echo \$(seqtk 2>&1) | sed 's/^.*Version: //; s/ .*\$//')" > versions.yml
