@@ -6,7 +6,7 @@ process NCBI_DATA {
     tuple val(taxon), val(segment_synonyms), val(seg_status)
 
     output:
-    tuple val(taxon), path("genomic.fna.gz"),             emit: genomic
+    tuple val(taxon), path("genomic.fa.gz"),             emit: genomic
     tuple val(taxon), path("ncbi-meta.complete.csv"),     emit: complete
     tuple val(taxon), path("ncbi-meta.report-only.csv"),  emit: reportonly
     tuple val(taxon), path("ncbi-meta.subtype-only.csv"), emit: subtypeonly
