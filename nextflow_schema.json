@@ -80,8 +80,8 @@
                     "description": "If data should be pulled from NCBI."
                 },
                 "create": {
-                    "type": "string",
-                    "default": "true",
+                    "type": "boolean",
+                    "default": true,
                     "description": "If reference should be created."
                 }
             }
