@@ -40,8 +40,10 @@ meta <- meta %>%
   ungroup() %>%
   select(all_of(c(paste0(segmentKey$segment_name, ' Segment_Id'),select_cols))) %>%
   pivot_longer(names_to = 'segment_name', values_to = 'accession', 1:8) %>%
+  group_by(accession) %>%
   mutate(segment_name = str_remove_all(segment_name, pattern = ' Segment_Id'),
          accession    = unlist(str_split(accession, pattern = '\\|'))[1]) %>%
+  ungroup() %>%
   left_join(segmentKey, by = 'segment_name') %>%
   filter(accession %in% names(seqs)) %>%
   drop_na(segment)

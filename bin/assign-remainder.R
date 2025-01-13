@@ -46,17 +46,18 @@ df.assigned <- df.mash %>%
 
 #---- DETERMINE SEQS THAT DID NOT ASSIGN ----#
 df.not_assigned <- df.all %>%
-  filter(!(seq %in% df.assigned$seq))
+  filter(!(seq %in% df.assigned$seq)) %>%
+  drop_na(seq)
 
 # if only one sequence was not assigned then add it as its own cluster
 if(nrow(df.not_assigned) == 1){
-    df.assigned <- df.not_assigned %>%
-      mutate(taxon = taxon_name,
-             segment = segment_name,
-             cluster = min(df.assigned$cluster)+1) %>%
-             rbind(df.assigned) %>%
-  select(seq, taxon, segment, cluster)
-      df.not_assigned <- data.frame()
+  df.assigned <- df.not_assigned %>%
+    mutate(taxon = taxon_name,
+          segment = segment_name,
+          cluster = min(df.assigned$cluster)+1) %>%
+    rbind(df.assigned) %>%
+    select(seq, taxon, segment, cluster)
+  df.not_assigned <- data.frame()
 }
 
 #---- WRITE RESULTS ----#

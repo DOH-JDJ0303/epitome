@@ -84,7 +84,7 @@ if( nrow(df.seqs.pass) > max_cluster ){
     df.top <- df.seqs.pass[1:max_cluster,]
     saveFasta(df.top, paste0(file.basename,'.top.fa'))
     ## get remainder & save
-    df.remainder <- df.seqs.pass[max_cluster+1:nrow(df.seqs.pass),]
+    df.remainder <- df.seqs.pass[(max_cluster+1):nrow(df.seqs.pass),]
     saveFasta(df.remainder, paste0(file.basename,'.remainder.fa'))
 }
 
