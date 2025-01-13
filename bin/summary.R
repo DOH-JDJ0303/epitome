@@ -46,20 +46,6 @@ collapseCols <- function(val){
   }
   return(res)
 }
-# function for removing brackets
-cleanBrackets <- function(data){
-  if(is.na(data)){
-    result <- data
-  }else if( ! grepl(';', data) ){
-    result <- str_remove_all(data, pattern = '[\\[\\]]')
-    if(result == ''){
-      result <- NA_character_
-    }
-  }else{
-    result <- data
-  } 
-  return(result)
-}
 # function for counting number of elements in a bracket list
 countElements <- function(data){
     return(str_count(data, pattern = ';') + 1)
@@ -134,8 +120,7 @@ df.summary <- df.accessionKey %>%
   unique() %>%
   ungroup() %>%
   mutate(n_raw = countElements(accessions),
-         seq = str_remove_all(seq, pattern = 'seq')) %>%
-  mutate_all(cleanBrackets)
+         seq = str_remove_all(seq, pattern = 'seq'))
 # fix any missing taxon and segment info
 taxonName <- df.summary %>%
   filter(!(segment %in% c('','NA','none','null','NULL'))) %>%
