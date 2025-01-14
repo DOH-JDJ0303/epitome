@@ -13,6 +13,7 @@ seqs_path   <- args[3]
 amb_thresh  <- as.numeric(args[4])
 len_thresh  <- as.numeric(args[5])
 max_cluster <- as.numeric(args[6])
+exclusions  <- args[7]
 
 #---- VERSION ----#
 if(taxon == "version"){
@@ -27,12 +28,18 @@ library(Biostrings)
 #----- MAIN -----#
 # File basename
 file.basename <- paste(str_replace_all(taxon, pattern = ' ', replacement = '_'), segment,sep='-')
-
 # Load sequences
 seqs <- readDNAStringSet(seqs_path)
 # Combine into a data frame 
 df.seqs <- data.frame(accession = str_remove(names(seqs), pattern = "\\s.*"), length = width(seqs), seqString = as.character(seqs, use.names = F), stringsAsFactors = FALSE) %>%
   mutate(seqString = toupper(seqString))
+# Remove any sequences in the "exclusions" list
+if(file.exists(exclusions)){
+  exclusions <- read_csv(exclusions, col_names = c('accession','reason'))
+  df.seqs <- df.seqs %>%
+    filter(!(accession %in% exclusions$accession)) %>%
+    drop_na(accession)
+}
 
 # Consolidate sequences
 df.seqs <- df.seqs %>%
@@ -60,8 +67,6 @@ df.seqs <- df.seqs %>%
          filters            = paste0('[illegalBases: ',filterTest(filter_illegalBases),', ambRatio: ',filterTest(filter_ambRatio),', lenght: ',filterTest(filter_length),']')
          ) %>%
   ungroup()
-
-
 # Save passing sequences to file
 ## function for saving fasta file
 saveFasta <- function(df,name){
@@ -87,7 +92,6 @@ if( nrow(df.seqs.pass) > max_cluster ){
     df.remainder <- df.seqs.pass[(max_cluster+1):nrow(df.seqs.pass),]
     saveFasta(df.remainder, paste0(file.basename,'.remainder.fa'))
 }
-
 # Save metadata file
 metadata <- df.seqs #%>%
   # select(-filter_illegalBases, -filter_ambRatio, -filter_length)

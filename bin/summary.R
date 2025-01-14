@@ -75,7 +75,7 @@ if(file.exists(metadata_file)){
 #----- CLEAN DATA -----#
 df.qc <- df.qc %>%
   select(seq, accessions, length) %>%
-  rename(input_lengths = length) %>% 
+  rename(input_lengths = length) %>%
   mutate_all(as.character) %>%
   drop_na(seq)
 df.clusters <- df.clusters %>%
@@ -87,6 +87,7 @@ df.refs <- df.refs %>%
   mutate_all(as.character) %>%
   drop_na(cluster)
 df.meta <- df.meta %>%
+  mutate(across(everything(), ~ gsub("[\r\n]", "", .))) %>%
   mutate_all(as.character) %>%
   drop_na(accession) %>%
   filter(accession != 'null') %>%
@@ -145,13 +146,14 @@ extra_cols <- df.summary %>%
   select(-any_of(main_cols)) %>%
   colnames()
 df.summary <- df.summary %>%
-  select(all_of(c(main_cols, extra_cols)))
+  select(all_of(c(main_cols, extra_cols))) %>%
+  select_if(function(col) !all(is.na(col) | col == ""))
 
 #----- WRITE TO FILE -----#
 # full summary
 write.csv(x = df.summary, file = 'summary.full.csv', quote = T, row.names = F)
 # simple summary
-main_cols <- c('taxon','segment','assembly','next_closest_ani')
+main_cols <- c('taxon','segment','assembly','length','next_closest_ani')
 extra_cols <- df.meta %>%
   select(-any_of(main_cols)) %>%
   colnames()

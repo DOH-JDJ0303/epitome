@@ -31,7 +31,7 @@ workflow CREATE_SUBWF {
     */
     INPUT_QC(
         ch_input
-            .map{ [ it.taxon, it.segment, it.assembly ] }
+            .map{ [ it.taxon, it.segment, it.assembly, it.exclusions ] }
     )
     ch_versions = ch_versions.mix(INPUT_QC.out.versions.first())
 

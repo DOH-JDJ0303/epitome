@@ -8,6 +8,7 @@ args <- commandArgs(trailingOnly=T)
 fasta_file    <- args[1]
 metadata_file <- args[2]
 taxon         <- args[3]
+species       <- args[4]
 
 #---- LIBRARY ----#
 library(tidyverse)
@@ -29,10 +30,11 @@ select_cols <- c('taxon', 'geographicRegion','collectionDate','organismName_host
 meta <- meta %>%
   group_by(Isolate_Id) %>%
   mutate(taxon             = taxon,
+         species           = species,
          geographicRegion  = unlist(str_split(Location, ' / '))[1],
          collectionDate    = substr(Collection_Date, 1, 4),
          organismName_host = Host,
-         subtype           = str_remove_all(Subtype, pattern = 'A( / )'),
+         serotype          = str_remove_all(Subtype, pattern = 'A( / )'),
          lineage           = Lineage,
          clade             = Clade,
          HA_type           = str_extract(subtype, pattern = 'H[1-9]+'),

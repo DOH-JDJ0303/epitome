@@ -7,6 +7,7 @@ library(tidyverse)
 
 mergeMetadata <- function(file){
     df <- read_csv(file) %>%
+      mutate(across(everything(), ~ gsub("[\r\n]", "", .))) %>%
       mutate_all(as.character)
     return(df)
 }

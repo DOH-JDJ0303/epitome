@@ -74,8 +74,15 @@ workflow NCBI_DATA_SUBWF {
             .map{ taxon, segment, assembly, metadata -> [ taxon, segment, assembly, metadata ] }
     )
 
+    MERGE_INPUTS
+        .out
+        .merged
+        .join( ch_input.map{ [ it.taxon, it.segment, it.exclusions ] }, by: [0,1], remainder: true)
+        .map{ taxon, segment, assembly, metadata, exclusions -> [ taxon: taxon, segment: segment, assembly: assembly, metadata: metadata, exclusions: exclusions ? exclusions : [] ] }
+        .set{ ch_input }
+
     emit:
-    input    = MERGE_INPUTS.out.merged.map{ taxon, segment, assembly, metadata -> [ taxon: taxon, segment: segment, assembly: assembly, metadata: metadata ] }
+    input    = ch_input
     versions = ch_versions
 }
 
