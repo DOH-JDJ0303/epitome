@@ -31,7 +31,6 @@ workflow NCBI_DATA_SUBWF {
       .splitCsv(header: true, quote: '"')
       .map{ taxon, data -> data + [ taxon: taxon ]}
       .set{ ch_ncbi_data }
-    ch_ncbi_data.filter{it.segment == null}.view()
     ch_ncbi_data
         .map{ [ it.taxon, it.segment, it ] }
         .groupTuple(by: [0,1])
@@ -73,11 +72,11 @@ workflow NCBI_DATA_SUBWF {
             .groupTuple(by: [0,1])
             .map{ taxon, segment, assembly, metadata -> [ taxon, segment, assembly, metadata ] }
     )
-
     MERGE_INPUTS
         .out
         .merged
         .join( ch_input.map{ [ it.taxon, it.segment, it.exclusions ] }, by: [0,1], remainder: true)
+        .filter{ it[2] } // excludes any unmatched 'wg' segments automatically assigned while loading the samplesheet.
         .map{ taxon, segment, assembly, metadata, exclusions -> [ taxon: taxon, segment: segment, assembly: assembly, metadata: metadata, exclusions: exclusions ? exclusions : [] ] }
         .set{ ch_input }
 

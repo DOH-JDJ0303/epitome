@@ -35,7 +35,7 @@ df.seqs <- data.frame(accession = str_remove(names(seqs), pattern = "\\s.*"), le
   mutate(seqString = toupper(seqString))
 # Remove any sequences in the "exclusions" list
 if(file.exists(exclusions)){
-  exclusions <- read_csv(exclusions, col_names = c('accession','reason'))
+  exclusions <- read_csv(exclusions)
   df.seqs <- df.seqs %>%
     filter(!(accession %in% exclusions$accession)) %>%
     drop_na(accession)
