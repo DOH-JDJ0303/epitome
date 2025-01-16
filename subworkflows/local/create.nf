@@ -2,21 +2,14 @@
 // Check input samplesheet and get read channels
 //
 
-include { INPUT_QC                     } from '../../modules/local/input-qc'
-include { MASH_TOP                     } from '../../modules/local/mash'
-include { CLUSTER                      } from '../../modules/local/cluster'
-include { MASH_REMAINDER               } from '../../modules/local/mash'
-include { ASSIGN_REMAINDER             } from '../../modules/local/assign-remainder'
-include { SEQTK_LOOSEENDS              } from '../../modules/local/seqtk_subseq'
-include { MASH_TOP as MASH_LOOSEENDS   } from '../../modules/local/mash'
-include { CLUSTER as CLUSTER_LOOSEENDS } from '../../modules/local/cluster'
-include { MERGE_CLUSTERS               } from '../../modules/local/merge-clusters'
-include { SEQTK_SUBSEQ                 } from '../../modules/local/seqtk_subseq'
-include { MAFFT                        } from '../../modules/local/mafft'
-include { CONSENSUS                    } from '../../modules/local/consensus'
-include { MASH_TOP as MASH_CONDENSE    } from '../../modules/local/mash'
-include { CONDENSE                     } from '../../modules/local/condense'
-include { SUMMARY                      } from '../../modules/local/summary'
+include { INPUT_QC        } from '../../modules/local/input-qc'
+include { CLUSTER         } from '../../modules/local/cluster'
+include { SEQTK_LOOSEENDS } from '../../modules/local/seqtk_subseq'
+include { SEQTK_SUBSEQ    } from '../../modules/local/seqtk_subseq'
+include { MAFFT           } from '../../modules/local/mafft'
+include { CONSENSUS       } from '../../modules/local/consensus'
+include { CONDENSE        } from '../../modules/local/condense'
+include { SUMMARY         } from '../../modules/local/summary'
 
 workflow CREATE_SUBWF {
     take:
