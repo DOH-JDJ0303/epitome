@@ -23,14 +23,6 @@ process INPUT_QC {
     # gather metrics
     input-qc.R "${taxon}" "${segment}" "${sequences.name.replaceAll(/\.gz$/,'')}" "${params.amb_threshold}" "${params.len_threshold}" "${exclusions}"
     gzip *.fa
-    # check for top and remainder files
-    if [ ! -e "${prefix}.top.fa.gz" ]
-    then
-        STATUS=null
-        touch ${prefix}.top.fa.gz ${prefix}.remainder.fa.gz
-    else
-        STATUS=subsampled
-    fi
     # odd stuff going on with versioning
     echo -e "\\"${task.process}\\":\\n    input-qc.R: \$(input-qc.R version)" > versions.yml
     """
