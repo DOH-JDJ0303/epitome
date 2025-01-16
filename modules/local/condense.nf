@@ -28,6 +28,7 @@ process CONDENSE {
     # rename output
     mv condensed.csv ${prefix}.condensed.csv
     # remove condensed sequences
+    rm seqs.fa.gz
     for s in \$(cat ${prefix}.condensed.csv | tr -d '"' | tail -n +2 | awk -v FS=',' '\$5 != "" {print \$4}' | uniq)
     do
         rm \${s}.fa.gz

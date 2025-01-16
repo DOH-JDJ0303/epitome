@@ -19,7 +19,7 @@ process MAFFT {
 
     shell:
     def args         = task.ext.args   ?: ''
-    prefix = "${taxon.replaceAll(' ','_')}-${segment}"
+    prefix = "${taxon.replaceAll(' ','_')}-${segment}-${cluster}"
     """
     # run mafft
     mafft \\
