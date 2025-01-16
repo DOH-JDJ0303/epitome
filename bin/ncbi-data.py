@@ -39,7 +39,7 @@ def write_dicts_to_csv(dicts, filename):
     keys = set()
     for d in dicts:
         keys.update(d.keys())
-    keys = list(keys)
+    keys = sorted(list(keys))
 
     # Write to CSV
     with open(filename, 'w', newline='') as file:

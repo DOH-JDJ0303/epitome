@@ -37,6 +37,18 @@ collapseCols <- function(val){
     res <- ''
   }else if( length(res) == 1 ){
     res <- unlist(res)
+  }else if( any( str_detect(res, pattern = '[0-9]+ - [0-9]+') ) ){
+    # cat(paste0('\n',as.character(res),' is numeric range!\n'))
+    res <- res %>%
+      str_split(pattern = ' - ') %>%
+      unlist() %>%
+      data.frame() %>%
+      rename(var = 1) %>%
+      filter(!(var %in% c('','NA','none','null','NULL'))) %>%
+      drop_na(var) %>%
+      unique() %>%
+      .$var  
+    res <- paste(min(as.numeric(res)),max(as.numeric(res)),sep=' - ')
   }else if( any(!is.na(suppressWarnings(as.numeric(res)))) ){
     # cat(paste0('\n',as.character(res),' is numeric!\n'))
     res <- paste(min(as.numeric(res)),max(as.numeric(res)),sep=' - ')
@@ -79,10 +91,11 @@ df.qc <- df.qc %>%
   mutate_all(as.character) %>%
   drop_na(seq)
 df.clusters <- df.clusters %>%
-  select(-taxon, -segment) %>% 
   mutate_all(as.character) %>%
   drop_na(cluster)
 df.refs <- df.refs %>%
+  mutate(across(everything(), ~ gsub(",", ";", .))) %>%
+  mutate(across(everything(), ~ gsub("'", "", .))) %>%
   rename(n_qc = n) %>%
   mutate_all(as.character) %>%
   drop_na(cluster)
@@ -153,15 +166,26 @@ df.summary <- df.summary %>%
 # full summary
 write.csv(x = df.summary, file = 'summary.full.csv', quote = T, row.names = F)
 # simple summary
-main_cols <- c('taxon','segment','assembly','length','next_closest_ani')
+main_cols <- c('taxon','segment','assembly','length','neighbor_ani','neighbor')
 extra_cols <- df.meta %>%
   select(-any_of(main_cols)) %>%
   colnames()
 df.simple <- df.summary %>%
-  filter(!(assembly %in% c('condensed','failed_qc'))) %>%
+  filter(!(assembly %in% c('failed_qc'))) %>%
+  mutate(assembly     = case_when(condensed != '' ~ condensed,
+                              TRUE ~ assembly),
+         length       = case_when(condensed != '' ~ NA_character_,
+                              TRUE ~ length),
+         neighbor_ani = case_when(condensed != '' ~ NA_character_,
+                              TRUE ~ neighbor_ani),
+        neighbor      = case_when(condensed != '' ~ NA_character_,
+                              TRUE ~ neighbor)) %>%
+  select(-condensed) %>%
+  group_by(assembly) %>%
+  mutate_at(vars(-group_cols()), collapseCols) %>%
+  ungroup() %>%
   select(any_of(c(main_cols, extra_cols))) %>%
-  unique() %>%
-  unique
+  unique()
 write.csv(x = df.simple, file = 'summary.simple.csv', quote = T, row.names = F)
 # taxon summary
 n_raw <- df.summary %>%
@@ -169,15 +193,15 @@ n_raw <- df.summary %>%
   as.numeric() %>%
   sum()
 n_pass <- df.summary %>%
-  filter(!(assembly %in% c('failed_qc'))) %>%
+  filter(assembly != 'failed_qc') %>%
   .$n_raw %>%
   as.numeric() %>%
   sum()
-max_ani <- df.summary %>%
-  filter(!(assembly %in% c('condensed','failed_qc'))) %>%
-  .$next_closest_ani %>%
+
+max_ani <- df.simple %>%
+  .$neighbor_ani %>%
   as.numeric() %>%
-  max()
+  max(na.rm = T)
 df.taxon <- data.frame(taxon   = taxonName,
                        segment = segmentName,
                        n_raw   = n_raw,

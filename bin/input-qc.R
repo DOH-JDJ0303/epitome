@@ -12,8 +12,7 @@ segment     <- args[2]
 seqs_path   <- args[3]
 amb_thresh  <- as.numeric(args[4])
 len_thresh  <- as.numeric(args[5])
-max_cluster <- as.numeric(args[6])
-exclusions  <- args[7]
+exclusions  <- args[6]
 
 #---- VERSION ----#
 if(taxon == "version"){
@@ -79,19 +78,7 @@ saveFasta <- function(df,name){
 ## filter to only passing sequences & save
 df.seqs.pass <- df.seqs %>%
   filter(!(filter_illegalBases) & !(filter_ambRatio) & !(filter_length))
-saveFasta(df.seqs.pass, paste0(file.basename,'.all.fa'))
-## check if the number of passing sequences exceeds the maximum number of sequences allowed in a cluster
-if( nrow(df.seqs.pass) > max_cluster ){
-    ## randomize dataframe
-    set.seed(11)
-    df.seqs.pass <- df.seqs.pass[sample(nrow(df.seqs.pass)),]
-    ## get top set & save
-    df.top <- df.seqs.pass[1:max_cluster,]
-    saveFasta(df.top, paste0(file.basename,'.top.fa'))
-    ## get remainder & save
-    df.remainder <- df.seqs.pass[(max_cluster+1):nrow(df.seqs.pass),]
-    saveFasta(df.remainder, paste0(file.basename,'.remainder.fa'))
-}
+saveFasta(df.seqs.pass, paste0(file.basename,'.qc.fa'))
 # Save metadata file
 metadata <- df.seqs #%>%
   # select(-filter_illegalBases, -filter_ambRatio, -filter_length)

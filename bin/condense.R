@@ -28,8 +28,9 @@ file.base <- paste(str_replace_all(taxon_name, pattern = ' ', replacement = '_')
 
 #---- LOAD CLUSTER SET & GET COUNT ----#
 clusters.df <- read_csv(clusters_path) %>%
-  filter(taxon == taxon_name & segment == segment_name) %>%
-  mutate(ref = paste(str_replace_all(taxon,pattern = ' ', replacement = '_'),segment,cluster,sep = "-")) %>%
+  mutate(taxon = taxon_name,
+         segment = segment_name,
+         ref = paste(str_replace_all(taxon,pattern = ' ', replacement = '_'),segment,cluster,sep = "-")) %>%
   group_by(ref,taxon,segment,cluster) %>%
   count()
 
@@ -69,7 +70,7 @@ if(nrow(clusters.df) > 1){
     left_join(clusters.df, by = "ref") %>%
     left_join(len.df, by = "ref") %>%
     group_by(cluster2) %>%
-    mutate(condensed = case_when(n() > 1 ~ paste0('[',paste(cluster, collapse = ","),']'),
+    mutate(condensed = case_when(n() > 1 ~ paste0('[',paste(cluster, collapse = "; "),']'),
                                  TRUE ~ '[]')) %>%
     ungroup()
   #---- SELECT BEST REFERENCE FOR EACH CLUSTER ----#

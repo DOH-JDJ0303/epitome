@@ -7,9 +7,9 @@ process INPUT_QC {
     tuple val(taxon), val(segment), path(sequences), path(exclusions)
 
     output:
-    tuple val(taxon), val(segment), path("${prefix}.all.fa.gz"), path("${prefix}.top.fa.gz"), path("${prefix}.remainder.fa.gz"), env(STATUS), emit: seqs
-    tuple val(taxon), val(segment), path("${prefix}.qc.csv"),                                                                                 emit: summary
-    path "versions.yml",                                                                                                                      emit: versions
+    tuple val(taxon), val(segment), path("${prefix}.qc.fa.gz"), emit: seqs
+    tuple val(taxon), val(segment), path("${prefix}.qc.csv"),   emit: summary
+    path "versions.yml",                                        emit: versions
 
 
     when:
@@ -21,7 +21,7 @@ process INPUT_QC {
     # decompress FASTA file, if needed
     gzip -d ${sequences} || true
     # gather metrics
-    input-qc.R "${taxon}" "${segment}" "${sequences.name.replaceAll(/\.gz$/,'')}" "${params.amb_threshold}" "${params.len_threshold}" "${params.max_cluster}" "${exclusions}"
+    input-qc.R "${taxon}" "${segment}" "${sequences.name.replaceAll(/\.gz$/,'')}" "${params.amb_threshold}" "${params.len_threshold}" "${exclusions}"
     gzip *.fa
     # check for top and remainder files
     if [ ! -e "${prefix}.top.fa.gz" ]

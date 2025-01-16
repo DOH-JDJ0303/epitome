@@ -4,11 +4,11 @@ process CONDENSE {
     stageInMode 'copy'
 
     input:
-    tuple val(taxon), val(segment), path(dist), path(consensus), path(clusters)
+    tuple val(taxon), val(segment), path(seqs), path(clusters)
 
     output:
     tuple val(taxon), val(segment), path("${prefix}.condensed.csv"), path("*.fa.gz", includeInputs: true), emit: results
-    path "versions.yml",                                                                                  emit: versions
+    // path "versions.yml",                                                                                  emit: versions
 
 
     when:
@@ -17,26 +17,20 @@ process CONDENSE {
     script:
     prefix = "${taxon.replaceAll(' ','_')}-${segment}"
     """
-    # get seq lengths
-    zcat ${consensus} | paste - - | tr -d '>' | sed 's/.fa//g' | awk -v OFS=',' '{print \$1,length(\$2)}' > lengths.csv
-
-    # extract distances
-    zcat ${dist} > dist.txt
-
+    # combine sequences into single file
+    cat ${seqs} > seqs.fa.gz
     # run script
-    condense.R dist.txt lengths.csv ${clusters} "${taxon}" "${segment}" ${params.dist_threshold}
-
-    # remove sequences that will not be retained
-    mkdir tmp
-    for s in \$(cat ${prefix}.condensed.csv | tr -d '"' | tail -n +2 | awk -v FS=',' '\$1 != "condensed" {print \$1}' | uniq)
+    epitome-condense.py \\
+        --fasta seqs.fa.gz \\
+        --clusters ${clusters} \\
+        --dist_threshold ${params.dist_threshold} \\
+        --threads ${task.cpus}
+    # rename output
+    mv condensed.csv ${prefix}.condensed.csv
+    # remove condensed sequences
+    for s in \$(cat ${prefix}.condensed.csv | tr -d '"' | tail -n +2 | awk -v FS=',' '\$5 != "" {print \$4}' | uniq)
     do
-        mv \${s}.fa.gz tmp/
+        rm \${s}.fa.gz
     done
-    rm *.fa.gz || true
-    mv tmp/*.fa.gz ./ || true 
-    rm -r tmp || true
-
-    # something about the normal way of getting version info messes with the creations of .command.env
-    echo -e "\\"${task.process}\\":\\n    condense.R: \$(condense.R version)" > versions.yml
     """
 }

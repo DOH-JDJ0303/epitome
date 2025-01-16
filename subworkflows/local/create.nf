@@ -4,7 +4,7 @@
 
 include { INPUT_QC                     } from '../../modules/local/input-qc'
 include { MASH_TOP                     } from '../../modules/local/mash'
-include { CLUSTER as CLUSTER_MAIN      } from '../../modules/local/cluster'
+include { CLUSTER                      } from '../../modules/local/cluster'
 include { MASH_REMAINDER               } from '../../modules/local/mash'
 include { ASSIGN_REMAINDER             } from '../../modules/local/assign-remainder'
 include { SEQTK_LOOSEENDS              } from '../../modules/local/seqtk_subseq'
@@ -34,103 +34,22 @@ workflow CREATE_SUBWF {
             .map{ [ it.taxon, it.segment, it.assembly, it.exclusions ] }
     )
     ch_versions = ch_versions.mix(INPUT_QC.out.versions.first())
+    INPUT_QC.out.seqs.set{ ch_input_qc }
 
-    INPUT_QC
-        .out
-        .seqs
-        .map{taxon, segment, all, top, remainder, status -> [ taxon: taxon, segment: segment, all: all, top: status == 'null' ? null : top, remainder: status == 'null' ? null : remainder, status: status == 'null' ? null : status ]}
-        .set{ ch_input_qc }
-
-    /*
-    =============================================================================================================================
-        CLUSTER SEQUENCES: CLUSTER SUBSET
-    =============================================================================================================================
-    */
-    // MODULE: Determine pairwise Mash distances of sequence subset (number determined by `--max_clusters`; will include all if lower than the assigned threshold.)
-    MASH_TOP (
+    CLUSTER (
         ch_input_qc
-            .map{ [ it.taxon, it.segment, it.status ? it.top : it.all ] }
     )
-    ch_versions = ch_versions.mix(MASH_TOP.out.versions.first())
+    CLUSTER.out.results.set{ ch_clusters }
 
-    // MODULE: Cluster subset with hclust & cutree
-    CLUSTER_MAIN (
-        MASH_TOP.out.dist,
-        "main"
-    )
-    ch_versions = ch_versions.mix(CLUSTER_MAIN.out.versions.first())
-
-    /*
-    =============================================================================================================================
-        CLUSTER SEQUENCES: ASSIGN REMAINING USING SUBSET CLASSIFIER
-    =============================================================================================================================
-    */
-    // MODULE: Run Mash on the remainder of sequences compared to representatives of each cluster identified in round 1
-    MASH_REMAINDER (
-        ch_input_qc
-            .filter{ it.status }
-            .map{ [ it.taxon, it.segment, it.top, it.remainder ] }
-            .join(CLUSTER_MAIN.out.results, by: [0,1])
-    )
-    // MODULE: Assign the remainder of sequences to a cluster
-    ASSIGN_REMAINDER (
-        MASH_REMAINDER.out.results
-    )
-    ch_versions = ch_versions.mix(ASSIGN_REMAINDER.out.versions.first())
-
-    /*
-    =============================================================================================================================
-        CLUSTER SEQUENCES: CLUSTER LOOSE-ENDS
-    =============================================================================================================================
-    */
-    SEQTK_LOOSEENDS (
-        ASSIGN_REMAINDER
-            .out
-            .not_assigned
-            .filter{ taxon, segment, seq_list, count -> count.toInteger() > 1 }
-            .map{ taxon, segment, seq_list, count -> [ taxon, segment, seq_list ] }
-            .join(ch_input_qc.map{ [ it.taxon, it.segment, it.remainder ] }, by: [0,1])
-    )
-    ch_versions = ch_versions.mix(SEQTK_LOOSEENDS.out.versions.first())
-
-    // MODULE: Determine pairwise Mash distances of loose-ends.
-    MASH_LOOSEENDS (
-        SEQTK_LOOSEENDS.out.sequences
-    )
-    ch_versions = ch_versions.mix(MASH_LOOSEENDS.out.versions.first())
-
-    // MODULE: Cluster loose-ends with hclust & cutree
-    CLUSTER_LOOSEENDS (
-        MASH_LOOSEENDS.out.dist,
-        "looseends"
-    )
-    ch_versions = ch_versions.mix(CLUSTER_LOOSEENDS.out.versions.first())
-
-    /*
-    =============================================================================================================================
-        CLUSTER SEQUENCES: COMBINE ALL CLUSTERS
-    =============================================================================================================================
-    */
-    MERGE_CLUSTERS (
-        CLUSTER_MAIN
-            .out
-            .results
-            .join(ASSIGN_REMAINDER.out.assigned, by: [0,1], remainder: true)
-            .join(CLUSTER_LOOSEENDS.out.results, by: [0,1], remainder: true)
-            .map{ taxon, segment, top, assigned, remainder -> [ taxon, segment, top, assigned ? assigned : [], remainder ? remainder : [] ] }
-    )
-    MERGE_CLUSTERS
-        .out
-        .merged
-        .map{ taxon, cluster, file -> file }
-        .splitCsv(header: true, quote: '"')
-        .set{ ch_clusters }
     // MODULE: Split clusters into multi-fasta files
     SEQTK_SUBSEQ(
         ch_clusters
-            .map{ [ it.taxon, it.segment, it.cluster, it.seq ] }
+            .splitCsv(header: true, quote: '"')
+            .transpose()
+            .map{ taxon, segment, data -> [ taxon, segment, data.cluster, data.seq ] }
+            .unique()
             .groupTuple(by: [0,1,2])
-            .combine(ch_input_qc.map{ [ it.taxon, it.segment, it.all ] }, by: [0,1])        
+            .combine(ch_input_qc, by: [0,1])        
     )
     ch_versions = ch_versions.mix(SEQTK_SUBSEQ.out.versions.first())
 
@@ -175,21 +94,11 @@ workflow CREATE_SUBWF {
         CONDENSE CONSENSUS SEQS
     =============================================================================================================================
     */
-    // MODULE: Determine pairwise Mash distances of consensus sequences.
-    MASH_CONDENSE (
-        ch_consensus
-    )
-    ch_versions = ch_versions.mix(MASH_CONDENSE.out.versions.first())
-
     // MODULE: Condense sequences that share sequence identity below `--dist_threshold`
     CONDENSE (
-        MASH_CONDENSE
-            .out
-            .dist
-            .join(ch_consensus, by: [0,1])
-            .join(MERGE_CLUSTERS.out.merged, by: [0,1])
+        ch_consensus.join(ch_clusters, by: [0,1])
     )
-    ch_versions = ch_versions.mix(CONDENSE.out.versions.first())
+    // ch_versions = ch_versions.mix(CONDENSE.out.versions.first())
 
     /*
      =============================================================================================================================
@@ -200,7 +109,7 @@ workflow CREATE_SUBWF {
         INPUT_QC
             .out
             .summary
-            .join(MERGE_CLUSTERS.out.merged, by: [0,1])
+            .join(ch_clusters, by: [0,1])
             .join(CONDENSE.out.results.map{ taxon, segment, summary, assembly -> [ taxon, segment, summary ] }, by: [0,1])
             .join( ch_input.map{ [ it.taxon, it.segment, it.metadata ] }, by: [0,1] )
     )

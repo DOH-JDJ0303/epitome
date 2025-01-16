@@ -100,14 +100,3 @@ def channelToTable ( data ){
     data.each{ table = table + [ allKeys.collect{ k -> it.containsKey(k) ? "\"${it[k]}\"" : 'null' }.join(',') ] }
     return table.join('\n')
 }
-
-def fixSegmentSynonyms(row){
-    def taxon = row[0]
-    def data  = row[1]
-    def syns  = row[2]
-    if(syns){
-        data.segment = syns.find { key, value -> value.any { it == data.segment }}?.key
-    }
-
-    return [ taxon, data ]
-}
