@@ -5,11 +5,11 @@
 
 version = 1.0
 start = f"""
+
 epitome-cluster.py v{version}
 
 Written by Jared Johnson
 jared.johnson@doh.wa.gov
-
 """
 print(start)
 
@@ -35,12 +35,13 @@ parser.add_argument("--fasta", dest="fasta", type=str, help="Path to FASTA file.
 parser.add_argument("--dist_threshold", dest="dist_threshold",  default=0.05, type=float, help="Distance thresholds used to create clusters (1-%ANI/100)(default: 0.05)")
 parser.add_argument("--max_cluster", dest="max_cluster",  default=1000, type=int, help="Maximum number of sequences to compare in the initial clustering round")
 parser.add_argument("--ksize", dest="ksize",  default=31, type=int, help="kmer size used by Sourmash")
+parser.add_argument("--scaled", dest="scaled",  default=1000, type=int, help="scaled value used by Sourmash")
 parser.add_argument("--outdir", dest="outdir",  default='./', type=str, help="Name of outputfile.")
 args = parser.parse_args()
 
 #----- FUNCTIONS -----#
 # Function for splitting a dictionary into a random subset and its remainder
-def mainAndRemainder(data, threshold):
+def mainAndRemainder(data, threshold, round):
     if len(data.items()) > threshold:
         # Get a random subset of keys
         keys = list(data.keys())
@@ -49,15 +50,15 @@ def mainAndRemainder(data, threshold):
         # Create the random subset dictionary
         subset = {key: data[key] for key in random_keys}
         for key, value in subset.items():
-            value['source'] = 'main'
+            value['source'] = f'main_{round}'
         
         # Create the remainder dictionary
         remainder = {key: data[key] for key in data if key not in random_keys}
         for key, value in remainder.items():
-            value['source'] = 'assigned'
+            value['source'] = f'assigned_{round}'
     else:
         for key, value in data.items():
-            value['source'] = 'main'
+            value['source'] = f'main_{round}'
         subset    = data
         remainder = {}
     
@@ -158,6 +159,34 @@ def assignClusters(data1, data2, data3, threshold):
                 data3[key1] = value1
     return data3
 
+# Function for peforming a clustering round
+def clusterSeqs(data, max_cluster, threshold, round, start):
+    if start != 0:
+        print(f'{datetime.datetime.now()}: Round {round} - Continuing from cluster {start}')
+    # Subset hashes based on the max allowed initial cluster dataset size
+    main, remainder = mainAndRemainder(data, max_cluster, round)
+    # Clustering Step 1 (Main)
+    print(f'{datetime.datetime.now()}: Round {round} - Clustering {len(main.items())} sequences')
+    clusters, last_cluster = createClusters(main, threshold, start, f'main_{round}')
+    print(f'{datetime.datetime.now()}: Round {round} - Clustered {len(clusters.items())} sequences into {last_cluster - start} clusters')
+
+    # Check if any further clustering is required
+    if len(remainder.items()) > 0:
+        # Assign clusters to the remaining sequences using representatives from the main clustering
+        reps = selectReps(clusters)
+        print(f'{datetime.datetime.now()}: Round {round} - Assigning {len(remainder.items())} sequences')
+        pre_assigned = len(clusters.items())
+        clusters = assignClusters(remainder, reps, clusters, threshold)
+        post_assigned = len(clusters.items())
+        print(f'{datetime.datetime.now()}: Round {round} - Assigned {post_assigned - pre_assigned} sequences')
+    
+    # Identify loose-ends
+    looseends = {}
+    looseends = {key: remainder[key] for key in remainder if key not in clusters.keys()}
+    print(f'{datetime.datetime.now()}: Round {round} - Done; {len(looseends.items())} sequences remain')
+
+    return clusters, looseends, last_cluster
+
 # Function for writing a dictionary to CSV
 def dictToCsv(dicts, filename):
     # Get all unique keys
@@ -176,64 +205,34 @@ def dictToCsv(dicts, filename):
 # Create dictionary of hashes
 minhashes = {}
 for record in screed.open(args.fasta):
-    mh = sourmash.MinHash(n=0, ksize=args.ksize, scaled=1000)
+    mh = sourmash.MinHash(n=0, ksize=args.ksize, scaled=args.scaled)
     mh.add_sequence(record.sequence, True)
     minhashes[record.name] = { 'mh': mh }
 print(f'{datetime.datetime.now()}: Loaded {len(minhashes.items())} sequences from {args.fasta}')
-# Subset hashes based on the max allowed initial cluster dataset size
-main, remainder = mainAndRemainder(minhashes, args.max_cluster)
 
-# Clustering Step 1 (Main)
-print(f'{datetime.datetime.now()}: Step 1: Main clustering ({len(main.items())} sequences)')
-all, max_cluster_all = createClusters(main, args.dist_threshold, 0, 'main')
-print(f'{datetime.datetime.now()}: Assigned {len(all.items())} sequences into {max_cluster_all} clusters.')
-
-# Check if any further clustering is required
-if len(remainder.items()) > 0:
-    # Assign clusters to the remaining sequences using representatives from the main clustering
-    reps = selectReps(all)
-    print(f'{datetime.datetime.now()}: Step 2: Remainder assignment ({len(remainder.items())} sequences)')
-    pre_assigned = len(all.items())
-    all = assignClusters(remainder, reps, all, args.dist_threshold)
-    post_assigned = len(all.items())
-    print(f'{datetime.datetime.now()}: Assigned {post_assigned - pre_assigned} sequences.')
-    # Identify any loose-ends
-    looseends = {}
-    looseends = {key: remainder[key] for key in remainder if key not in all.keys()}
-    if len(looseends.items()) > 0:
-        print(f'{datetime.datetime.now()}: Step 3: Loose-end clustering ({len(looseends.items())} sequences)')
-        # Update source
-        for key, value in looseends.items():
-            value['source'] = 'loose-end'
-        # Assign clusters to loose-ends and update cluster number based on largest existing value
-        pre_assigned = max_cluster_all
-        if len(looseends) > 1:
-            looseends, max_cluster_all = createClusters(looseends, args.dist_threshold, pre_assigned, 'loose-ends')
-        else:
-            for key, value in looseends.items():
-                value['cluster'] = max_cluster_all + 1
-            max_cluster_all += max_cluster_all
-        print(f'{datetime.datetime.now()}: Assigned {len(looseends.items())} sequences into {max_cluster_all - pre_assigned} clusters.')
-        # Add loose-ends to 'all'
-        for key, value in looseends.items():
-            all[key] = value
+data = minhashes
+start = 0
+round = 1
+results = {}
+while len(data.items()) > 0:
+    clusters, data, start = clusterSeqs(data, args.max_cluster, args.dist_threshold, round, start)
+    results.update(clusters)
+    round += 1
 
 # Write results to CSV
 print(f'{datetime.datetime.now()}: Writing file.')
-results = []
-for key, value in all.items():
+final = []
+for key, value in results.items():
     value['seq'] = key
     del value['mh']
-    results.append(value)
+    final.append(value)
 
-dictToCsv(results, f'{args.outdir}/clusters.csv')
+dictToCsv(final, f'{args.outdir}/clusters.csv')
 
 end = f"""
 
-Total Clusters: {max_cluster_all}
+Total clusters {start}
 Results saved to {args.outdir}
 
 """
 print(end)
-
-

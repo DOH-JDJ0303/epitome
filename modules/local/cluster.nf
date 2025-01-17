@@ -21,7 +21,9 @@ process CLUSTER {
     epitome-cluster.py \\
         --fasta ${seqs} \\
         --max_cluster ${params.max_cluster} \\
-        --dist_threshold ${params.dist_threshold}
+        --dist_threshold ${params.dist_threshold} \\
+        --ksize ${params.ksize} \\
+        --scaled ${params.scaled}
     
     mv clusters.csv ${prefix}.clusters.csv
     """
