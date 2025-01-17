@@ -159,12 +159,13 @@ extra_cols <- df.summary %>%
   select(-any_of(main_cols)) %>%
   colnames()
 df.summary <- df.summary %>%
-  select(all_of(c(main_cols, extra_cols))) %>%
-  select_if(function(col) !all(is.na(col) | col == ""))
+  select(all_of(c(main_cols, extra_cols)))
 
 #----- WRITE TO FILE -----#
 # full summary
-write.csv(x = df.summary, file = 'summary.full.csv', quote = T, row.names = F)
+df.summary %>%
+    select_if(function(col) !all(is.na(col) | col == "")) %>%
+  write.csv(file = 'summary.full.csv', quote = T, row.names = F)
 # simple summary
 main_cols <- c('taxon','segment','assembly','length','neighbor_ani','neighbor')
 extra_cols <- df.meta %>%
@@ -185,6 +186,7 @@ df.simple <- df.summary %>%
   mutate_at(vars(-group_cols()), collapseCols) %>%
   ungroup() %>%
   select(any_of(c(main_cols, extra_cols))) %>%
+  select_if(function(col) !all(is.na(col) | col == "")) %>%
   unique()
 write.csv(x = df.simple, file = 'summary.simple.csv', quote = T, row.names = F)
 # taxon summary
