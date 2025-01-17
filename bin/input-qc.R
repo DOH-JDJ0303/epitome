@@ -63,7 +63,7 @@ df.seqs <- df.seqs %>%
          filter_illegalBases = nchar(illegalBases) > 0, 
          filter_ambRatio    = ambRatio > amb_thresh, 
          filter_length      = sum(length >= median.length*(1+len_thresh) || length <= median.length*(1-len_thresh)) > 0,
-         filters            = paste0('[illegalBases: ',filterTest(filter_illegalBases),', ambRatio: ',filterTest(filter_ambRatio),', lenght: ',filterTest(filter_length),']')
+         filters            = paste0('[illegalBases: ',filterTest(filter_illegalBases),'; ambRatio: ',filterTest(filter_ambRatio),'; length: ',filterTest(filter_length),']')
          ) %>%
   ungroup()
 # Save passing sequences to file
@@ -80,6 +80,6 @@ df.seqs.pass <- df.seqs %>%
   filter(!(filter_illegalBases) & !(filter_ambRatio) & !(filter_length))
 saveFasta(df.seqs.pass, paste0(file.basename,'.qc.fa'))
 # Save metadata file
-metadata <- df.seqs #%>%
-  # select(-filter_illegalBases, -filter_ambRatio, -filter_length)
+metadata <- df.seqs %>%
+  select(-any_of(c('filter_illegalBases', 'filter_ambRatio', 'filter_length')))
 write.csv(x = metadata, file = paste0(file.basename,'.qc.csv'), quote = T, row.names = T)

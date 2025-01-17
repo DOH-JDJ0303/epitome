@@ -34,7 +34,6 @@ parser.add_argument("--fasta", dest="fasta", type=str, help="Path to FASTA file.
 parser.add_argument("--clusters", dest="clusters", type=str, help="Path to the cluster info.")
 parser.add_argument("--dist_threshold", dest="dist_threshold",  default=0.05, type=float, help="Distance thresholds used to create clusters (1-%ANI/100)(default: 0.05)")
 parser.add_argument("--ksize", dest="ksize",  default=31, type=int, help="kmer size used by Sourmash")
-parser.add_argument("--threads", dest="threads",  default=2, type=int, help="Number of threads")
 parser.add_argument("--outdir", dest="outdir",  default='./', type=str, help="Name of outputfile.")
 args = parser.parse_args()
 

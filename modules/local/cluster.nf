@@ -21,8 +21,8 @@ process CLUSTER {
     epitome-cluster.py \\
         --fasta ${seqs} \\
         --max_cluster ${params.max_cluster} \\
-        --dist_threshold ${params.dist_threshold} \\
-        --threads ${task.cpus}
+        --dist_threshold ${params.dist_threshold}
+    
     mv clusters.csv ${prefix}.clusters.csv
     """
 }

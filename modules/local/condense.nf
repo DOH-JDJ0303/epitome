@@ -23,8 +23,8 @@ process CONDENSE {
     epitome-condense.py \\
         --fasta seqs.fa.gz \\
         --clusters ${clusters} \\
-        --dist_threshold ${params.dist_threshold} \\
-        --threads ${task.cpus}
+        --dist_threshold ${params.dist_threshold}
+    
     # rename output
     mv condensed.csv ${prefix}.condensed.csv
     # remove condensed sequences
