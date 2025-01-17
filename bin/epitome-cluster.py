@@ -163,27 +163,34 @@ def assignClusters(data1, data2, data3, threshold):
 def clusterSeqs(data, max_cluster, threshold, round, start):
     if start != 0:
         print(f'{datetime.datetime.now()}: Round {round} - Continuing from cluster {start}')
-    # Subset hashes based on the max allowed initial cluster dataset size
-    main, remainder = mainAndRemainder(data, max_cluster, round)
-    # Clustering Step 1 (Main)
-    print(f'{datetime.datetime.now()}: Round {round} - Clustering {len(main.items())} sequences')
-    clusters, last_cluster = createClusters(main, threshold, start, f'main_{round}')
-    print(f'{datetime.datetime.now()}: Round {round} - Clustered {len(clusters.items())} sequences into {last_cluster - start} clusters')
+    if len(data.items()) > 1:
+        # Subset hashes based on the max allowed initial cluster dataset size
+        main, remainder = mainAndRemainder(data, max_cluster, round)
+        # Clustering Step 1 (Main)
+        print(f'{datetime.datetime.now()}: Round {round} - Clustering {len(main.items())} sequences')
+        clusters, last_cluster = createClusters(main, threshold, start, f'main_{round}')
+        print(f'{datetime.datetime.now()}: Round {round} - Clustered {len(clusters.items())} sequences into {last_cluster - start} clusters')
 
-    # Check if any further clustering is required
-    if len(remainder.items()) > 0:
-        # Assign clusters to the remaining sequences using representatives from the main clustering
-        reps = selectReps(clusters)
-        print(f'{datetime.datetime.now()}: Round {round} - Assigning {len(remainder.items())} sequences')
-        pre_assigned = len(clusters.items())
-        clusters = assignClusters(remainder, reps, clusters, threshold)
-        post_assigned = len(clusters.items())
-        print(f'{datetime.datetime.now()}: Round {round} - Assigned {post_assigned - pre_assigned} sequences')
-    
-    # Identify loose-ends
-    looseends = {}
-    looseends = {key: remainder[key] for key in remainder if key not in clusters.keys()}
-    print(f'{datetime.datetime.now()}: Round {round} - Done; {len(looseends.items())} sequences remain')
+        # Check if any further clustering is required
+        if len(remainder.items()) > 0:
+            # Assign clusters to the remaining sequences using representatives from the main clustering
+            reps = selectReps(clusters)
+            print(f'{datetime.datetime.now()}: Round {round} - Assigning {len(remainder.items())} sequences')
+            pre_assigned = len(clusters.items())
+            clusters = assignClusters(remainder, reps, clusters, threshold)
+            post_assigned = len(clusters.items())
+            print(f'{datetime.datetime.now()}: Round {round} - Assigned {post_assigned - pre_assigned} sequences')
+        
+        # Identify loose-ends
+        looseends = {}
+        looseends = {key: remainder[key] for key in remainder if key not in clusters.keys()}
+        print(f'{datetime.datetime.now()}: Round {round} - Done; {len(looseends.items())} sequences remain')
+    else:
+        looseends = {}
+        last_cluster = start + 1
+        for key, value in data.items():
+            value['cluster'] = last_cluster
+        clusters = data
 
     return clusters, looseends, last_cluster
 
