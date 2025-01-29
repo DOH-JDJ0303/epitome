@@ -1,19 +1,18 @@
 #!/usr/bin/env Rscript
-version <- "1.0"
+version <- "2.0"
 
 # summary.R
 # Author: Jared Johnson, jared.johnson@doh.wa.gov
 
 #---- ARGUMENTS ----#
 args <- commandArgs(trailingOnly = T)
-summary_file <- args[1]
-fastani_ava_file <- args[2]
-fastani_seeds_file <- args[3]
-seeds_file <- args[4]
-timestamp <- args[5]
+input_qc_file <- args[1]
+clusters_file <- args[2]
+refs_file     <- args[3]
+metadata_file <- args[4]
 
 #---- VERSION ----#
-if(summary_file == "version"){
+if(input_qc_file == "version"){
   cat(version, sep = "\n")
   quit(status=0)
 }
@@ -21,118 +20,194 @@ if(summary_file == "version"){
 #---- LIBRARIES ----#
 library(tidyverse)
 
-#---- FUNCTIONS ----#
-basename_fa <- function(path){
-    result <- basename(path) %>%
-      str_remove_all(pattern = ".fa.gz$")
-    return(result)
-    
-}
-
-#---- LOAD SUMMARIES ---- #
-clusters <- read.csv(summary_file, header = F, col.names = c("seq","taxa","segment","cluster","n","n2","length")) %>%
-  mutate(condensed = case_when(n2 > 1 ~ TRUE,
-                               n2 == 1 ~ FALSE)
-                               ) %>%
-  select(-n2)
-
-#---- LOAD FASTANI AVA RESULTS & ADD MISSING ----#
-fastani_ava <- read_tsv(fastani_ava_file, col_names = c("query","ref","ani","mapped","total")) %>%
-  select(query, ref, ani) %>%
-  mutate(query = basename_fa(query),
-         ref = basename_fa(ref))
-# get list of pairwise comparisons, add back to fastani_ava, filter by taxa & segment, then calculate ID
-q_filt <- clusters %>%
-  select(seq, taxa, segment, length) %>%
-  rename(query = seq)
-r_filt <- clusters %>%
-  mutate(ref = seq,
-         staxa=taxa,
-         sseg=segment) %>%
-  select(ref, staxa, sseg)
-fastani_ava <- clusters %>%
-  select(seq) %>%
-  mutate(query=seq,
-         tmp='this works') %>%
-  pivot_wider(names_from = "seq", values_from = "tmp" ) %>%
-  pivot_longer(names_to = "ref", values_to = "tmp", 2:ncol(.)) %>%
-  select(query, ref) %>%
-  full_join(fastani_ava, by = c("query", "ref")) %>%
-  full_join(q_filt, by = "query") %>%
-  full_join(r_filt, by = "ref") %>%
-  filter(taxa == staxa & segment == sseg) %>%
-  drop_na(query, ref) %>%
-  mutate_all(~replace(., is.na(.), 0)) %>%
-  select(-staxa, -sseg)
-write.csv(x=fastani_ava, file = "full-ani.csv", quote = F, row.names = F)
-#---- PLOT MATRIX ----#
-plot_matrix <- function(ts){
-  # subset datafralsme & create plot
-  df <- fastani_ava %>%
-    mutate(taxa_seg = paste(taxa,segment, sep = "-")) %>%
-    filter(taxa_seg == ts)
-  p <-ggplot(df, aes(x=query, y=ref, fill = ani))+
-      geom_tile()+
-      theme_bw()+
-      theme(axis.text.x = element_text(angle=90))
-  
-  n <- df$query %>% unique() %>% length()
-  if(n > 10){
-    dims <- n*0.5
+#----- FUNCTIONS -----#
+# function for collapsing rows by column
+collapseCols <- function(val){
+  res <- val %>%
+    str_remove_all(pattern = '[\\[\\]]') %>%
+    str_split(pattern = '; ') %>%
+    unlist() %>%
+    data.frame() %>%
+    rename(var = 1) %>%
+    filter(!(var %in% c('','NA','none','null','NULL'))) %>%
+    drop_na(var) %>%
+    unique() %>%
+    .$var
+  if( length(res) == 0 ){
+    res <- ''
+  }else if( length(res) == 1 ){
+    res <- unlist(res)
+  }else if( any( str_detect(res, pattern = '[0-9]+ - [0-9]+') ) ){
+    # cat(paste0('\n',as.character(res),' is numeric range!\n'))
+    res <- res %>%
+      str_split(pattern = ' - ') %>%
+      unlist() %>%
+      data.frame() %>%
+      rename(var = 1) %>%
+      filter(!(var %in% c('','NA','none','null','NULL'))) %>%
+      drop_na(var) %>%
+      unique() %>%
+      .$var  
+    res <- paste(min(as.numeric(res)),max(as.numeric(res)),sep=' - ')
+  }else if( any(!is.na(suppressWarnings(as.numeric(res)))) ){
+    # cat(paste0('\n',as.character(res),' is numeric!\n'))
+    res <- paste(min(as.numeric(res)),max(as.numeric(res)),sep=' - ')
   }else{
-    dims <- 5
+    # cat(paste0('\n',as.character(res),' is a character!\n'))
+    res <- paste0('[',paste(res, collapse = '; '),']')
   }
-  if(n<100){
-    ggsave(p, filename = paste0(ts,".jpg"), dpi = 300, height = dims, width = dims, limitsize = FALSE)
-  }else(cat("Matrix image not saved. Too many references!\n"))
-  
+  return(res)
 }
-
-ts_list <- fastani_ava %>%
-  mutate(taxa_seg = paste(taxa,segment, sep = "-")) %>%
-  .$taxa_seg %>%
+# function for counting number of elements in a bracket list
+countElements <- function(data){
+    return(str_count(data, pattern = ';') + 1)
+}
+# function for expanding accessions associated with each QC'd sequence
+expandAccessions <- function(row, df){
+  df[row,]$accessions %>%
+    str_remove_all(pattern = "[\\[\\]]") %>%
+    str_split(pattern = '; ') %>%
+    data.frame() %>%
+    rename(accession = 1) %>%
+    mutate(seq = df[row,]$seq) %>%
+    return()
+}
+#---- LOAD DATA ---- #
+# required data
+df.qc       <- read_csv(input_qc_file)
+df.clusters <- read_csv(clusters_file)
+df.refs     <- read_csv(refs_file)
+# optional data
+if(file.exists(metadata_file)){
+  df.meta <- read_csv(metadata_file)
+}else{
+  df.meta <- df.qc %>% 
+    select(seq)
+}
+#----- CLEAN DATA -----#
+df.qc <- df.qc %>%
+  select(seq, accessions, length) %>%
+  rename(input_lengths = length) %>%
+  mutate_all(as.character) %>%
+  drop_na(seq)
+df.clusters <- df.clusters %>%
+  mutate_all(as.character) %>%
+  drop_na(cluster)
+df.refs <- df.refs %>%
+  mutate(across(everything(), ~ gsub(",", ";", .))) %>%
+  mutate(across(everything(), ~ gsub("'", "", .))) %>%
+  rename(n_qc = n) %>%
+  mutate_all(as.character) %>%
+  drop_na(cluster)
+df.meta <- df.meta %>%
+  mutate(across(everything(), ~ gsub("[\r\n]", "", .))) %>%
+  mutate_all(as.character) %>%
+  drop_na(accession) %>%
+  filter(accession != 'null') %>%
+  select(-taxon, -segment) %>%
   unique()
-dev_null <- lapply(ts_list, FUN = plot_matrix)
+# expand accessions associated with each QC'd sequence
+df.accessionKey <- do.call(rbind, lapply(1:nrow(df.qc), FUN = expandAccessions, df.qc)) %>%
+  mutate_all(as.character) %>%
+  drop_na(accession) %>%
+  unique()
 
-#---- SUMMARIZE BLAST AVA FURTHER ----#
-fastani_ava <- fastani_ava %>%
-  filter(query != ref) %>%
-  group_by(query, taxa, segment) %>%
-  summarise(min_ani = round(min(ani), digits = 1), max_ani = round(max(ani), digits = 1)) %>%
-  mutate(min_ani = case_when(min_ani < 80 ~ '< 80',
-                             TRUE ~ as.character(min_ani)),
-         max_ani = case_when(max_ani < 80 ~ '< 80',
-                             TRUE ~ as.character(max_ani))) %>%
-  rename(seq = query) %>%
+#----- MERGE & CLEAN MORE -----#
+df.summary <- df.accessionKey %>%
+  full_join(df.meta, by = 'accession') %>%
+  drop_na(accession) %>%
+  select(-accession) %>%
+  full_join(df.qc, by = 'seq') %>%
+  drop_na(seq) %>%
+  full_join(df.clusters, by = 'seq') %>%
+  drop_na(seq) %>%
+  full_join(df.refs, by = "cluster") %>%
+  mutate(cluster = case_when(is.na(cluster) & ! is.na(seq) ~ 'failed_qc',
+                             TRUE ~ cluster),
+         ref     = case_when(cluster == 'failed_qc' ~ 'failed_qc',
+                             TRUE ~ ref),
+         seq = paste0('seq',seq)) %>%
+  drop_na(cluster) %>%
+  group_by(cluster) %>%
+  unique() %>%
+  mutate_at(vars(-group_cols()), collapseCols) %>%
+  unique() %>%
   ungroup() %>%
-  select(-taxa, -segment)
+  mutate(n_raw = countElements(accessions),
+         seq = str_remove_all(seq, pattern = 'seq'))
+# fix any missing taxon and segment info
+taxonName <- df.summary %>%
+  filter(!(segment %in% c('','NA','none','null','NULL'))) %>%
+  drop_na(taxon) %>%
+  slice(1) %>%
+  .$taxon
+segmentName <- df.summary %>%
+  filter(!(segment %in% c('','NA','none','null','NULL'))) %>%
+  drop_na(segment) %>%
+  slice(1) %>%
+  .$segment
+df.summary <- df.summary %>%
+  mutate(taxon   = taxonName,
+         segment = segmentName) %>%
+  drop_na(taxon)
+# rename columns
+df.summary <- df.summary %>%
+  rename(assembly = ref)
+# reorder columns
+main_cols <- c('taxon','segment','assembly','length','n_qc','n_raw','cluster','condensed')
+extra_cols <- df.summary %>%
+  select(-any_of(main_cols)) %>%
+  colnames()
+df.summary <- df.summary %>%
+  select(all_of(c(main_cols, extra_cols)))
 
-#---- JOIN FINAL DATASETS & SUMMARIZE ----#
-## WITHOUT SEEDS
-clusters %>%
-  full_join(fastani_ava, by = "seq") %>%
-  select(seq,taxa,segment,cluster,n,condensed,length,min_ani,max_ani) %>%
-  write.csv(file = paste0(timestamp,"-summary.csv"), quote = F, row.names = F)
+#----- WRITE TO FILE -----#
+# full summary
+df.summary %>%
+    select_if(function(col) !all(is.na(col) | col == "")) %>%
+  write.csv(file = 'summary.full.csv', quote = T, row.names = F)
+# simple summary
+main_cols <- c('taxon','segment','assembly','length','neighbor_ani','neighbor')
+extra_cols <- df.meta %>%
+  select(-any_of(main_cols)) %>%
+  colnames()
+df.simple <- df.summary %>%
+  filter(!(assembly %in% c('failed_qc'))) %>%
+  mutate(assembly     = case_when(condensed != '' ~ condensed,
+                              TRUE ~ assembly),
+         length       = case_when(condensed != '' ~ NA_character_,
+                              TRUE ~ length),
+         neighbor_ani = case_when(condensed != '' ~ NA_character_,
+                              TRUE ~ neighbor_ani),
+        neighbor      = case_when(condensed != '' ~ NA_character_,
+                              TRUE ~ neighbor)) %>%
+  select(-condensed) %>%
+  group_by(assembly) %>%
+  mutate_at(vars(-group_cols()), collapseCols) %>%
+  ungroup() %>%
+  select(any_of(c(main_cols, extra_cols))) %>%
+  select_if(function(col) !all(is.na(col) | col == "")) %>%
+  unique()
+write.csv(x = df.simple, file = 'summary.simple.csv', quote = T, row.names = F)
+# taxon summary
+n_raw <- df.summary %>%
+  .$n_raw %>%
+  as.numeric() %>%
+  sum()
+n_pass <- df.summary %>%
+  filter(assembly != 'failed_qc') %>%
+  .$n_raw %>%
+  as.numeric() %>%
+  sum()
 
-## WITH SEEDS
-if(file.exists(fastani_seeds_file) & file.exists(seeds_file)){
-  seeds <- read.csv(seeds_file) %>% 
-    rename(seed = 1,
-           ref = 2) %>%
-    mutate(ref = basename_fa(ref))
-  read_tsv(fastani_seeds_file, col_names = c("query","ref","ani","mapped","total")) %>%
-    select(query, ref, ani) %>%
-    mutate(query = basename_fa(query),
-           ref = basename_fa(ref)) %>%
-    group_by(query) %>%
-    filter(ani == max(ani)) %>%
-    ungroup() %>%
-    filter(ani >= 95) %>%
-    mutate(ani = round(ani, digits = 1)) %>%
-    rename(seq = query,
-           seed_ani = ani) %>%
-    full_join(clusters, by = "seq") %>%
-    left_join(seeds, by = "ref") %>%
-    select(seq,taxa,segment,cluster,n,length,min_ani,max_ani, seed, seed_ani) %>%
-    write.csv(file = paste0(timestamp,"-summary.csv"), quote = F, row.names = F)
-}
+max_ani <- df.simple %>%
+  .$neighbor_ani %>%
+  as.numeric() %>%
+  max(na.rm = T)
+df.taxon <- data.frame(taxon   = taxonName,
+                       segment = segmentName,
+                       n_raw   = n_raw,
+                       n_pass  = n_pass,
+                       max_ani = max_ani) %>%
+            unique()
+write.csv(x = df.taxon, file = 'summary.taxon.csv', quote = T, row.names = F)

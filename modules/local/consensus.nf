@@ -4,18 +4,17 @@ process CONSENSUS {
     stageInMode 'copy'
 
     input:
-    tuple val(taxa), val(segment), val(cluster), path(aln)
+    tuple val(taxon), val(segment), val(cluster), path(aln)
 
     output:
-    tuple val(taxa), val(segment), path("${prefix}.fa.gz"), emit: fa
+    tuple val(taxon), val(segment), path("${prefix}.fa.gz"), emit: fa
     path "versions.yml",                                    emit: versions
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
-    prefix = "${taxa}-${segment}-${cluster}"
-
+    prefix = "${taxon.replaceAll(' ','_')}-${segment}-${cluster}"
     """
     # run script
     consensus.sh "${prefix}" ${aln}

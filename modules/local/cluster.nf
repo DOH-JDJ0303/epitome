@@ -4,28 +4,27 @@ process CLUSTER {
     stageInMode 'copy'
 
     input:
-    tuple val(taxa), val(segment), path(dist)
-    val iteration
+    tuple val(taxon), val(segment), path(seqs)
 
     output:
-    tuple val(taxa), val(segment), path("*.csv"), emit: results
-    path "*.jpg",        emit: plot
-    path "versions.yml", emit: versions
+    tuple val(taxon), val(segment), path("*.csv"), emit: results
+    path "*.png",        emit: plot, optional: true
+    // path "versions.yml", emit: versions
 
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
-    prefix = "${taxa}-${segment}"
+    prefix = "${taxon.replaceAll(' ','_')}-${segment}"
     """
-    zcat ${dist} | cut -f 1,2,3 > dists.txt
-    # run script
-    cluster.R dists.txt "${taxa}" "${segment}" "${iteration}" ${params.dist_threshold}
-
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        cluster.R: \$(cluster.R version)
-    END_VERSIONS
+    epitome-cluster.py \\
+        --fasta ${seqs} \\
+        --max_cluster ${params.max_cluster} \\
+        --dist_threshold ${params.dist_threshold} \\
+        --ksize ${params.ksize} \\
+        --scaled ${params.scaled}
+    
+    mv clusters.csv ${prefix}.clusters.csv
     """
 }
