@@ -26,7 +26,7 @@ meta <- read_csv(metadata_file)
 filename.base <- basename(metadata_file) %>%
   str_remove(pattern = '\\.csv')
 segmentKey <- data.frame(segment_name = c("PB2","PB1","PA","HA","NP","NA","MP","NS"), segment = 1:8)
-select_cols <- c('taxon', 'geographicRegion','collectionDate','organismName_host','subtype','clade','lineage','HA_type','NA_type')
+select_cols <- c('taxon', 'geographicRegion','collectionDate','organismName_host','serotype','clade','lineage','HA_type','NA_type','species')
 meta <- meta %>%
   group_by(Isolate_Id) %>%
   mutate(taxon             = taxon,
@@ -37,10 +37,10 @@ meta <- meta %>%
          serotype          = str_remove_all(Subtype, pattern = 'A( / )'),
          lineage           = Lineage,
          clade             = Clade,
-         HA_type           = str_extract(subtype, pattern = 'H[1-9]+'),
-         NA_type           = str_extract(subtype, pattern = 'N[1-9]+') ) %>%
+         HA_type           = str_extract(serotype, pattern = 'H[1-9]+'),
+         NA_type           = str_extract(serotype, pattern = 'N[1-9]+') ) %>%
   ungroup() %>%
-  select(all_of(c(paste0(segmentKey$segment_name, ' Segment_Id'),select_cols))) %>%
+  select(any_of(c(paste0(segmentKey$segment_name, ' Segment_Id'),select_cols))) %>%
   pivot_longer(names_to = 'segment_name', values_to = 'accession', 1:8) %>%
   group_by(accession) %>%
   mutate(segment_name = str_remove_all(segment_name, pattern = ' Segment_Id'),
