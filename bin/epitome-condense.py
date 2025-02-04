@@ -23,7 +23,6 @@ import csv
 import random
 import datetime
 import argparse
-import concurrent.futures
 import matplotlib.pyplot as plt
 import itertools
 
@@ -32,7 +31,7 @@ import itertools
 parser = argparse.ArgumentParser()
 parser.add_argument("--fasta", dest="fasta", type=str, help="Path to FASTA file.")
 parser.add_argument("--clusters", dest="clusters", type=str, help="Path to the cluster info.")
-parser.add_argument("--dist_threshold", dest="dist_threshold",  default=0.05, type=float, help="Distance thresholds used to create clusters (1-%ANI/100)(default: 0.05)")
+parser.add_argument("--dist_threshold", dest="dist_threshold",  default=0.02, type=float, help="Distance thresholds used to create clusters (1-%ANI/100)(default: 0.02)")
 parser.add_argument("--ksize", dest="ksize",  default=31, type=int, help="kmer size used by Sourmash")
 parser.add_argument("--outdir", dest="outdir",  default='./', type=str, help="Name of outputfile.")
 args = parser.parse_args()
@@ -42,37 +41,33 @@ args = parser.parse_args()
 def computeDistance(pair, data):
     id1, id2 = pair
     x = data[id1]['mh'].containment_ani(data[id2]['mh'])
-    return { 'id1': id1, 'id2': id2, 'dist': x.dist }
+    return x.dist 
 
-# Function to parallelize the computation of the matrix
 def computeMatrix(data):
     dist_long = []
 
-    # Get pairwise comparisons
-    ids = list(set([ key for key, value in data.items() ]))
-    ids.sort()
+    # Get unique and sorted list of IDs
+    ids = sorted(set(data.keys()))
+    # Generate pairwise comparisons
     pairs = list(itertools.combinations(ids, 2))
+    # Initialize the matrix with zeros
+    mat = np.zeros((len(ids), len(ids)))
+    # Calculate distance
     for pair in pairs:
-        dist_long.append(computeDistance(pair, data))
+        id1, id2 = pair
+        dist = computeDistance(pair, data)
+        dist_long.append({ 'id1': id1, 'id2': id2, 'dist': dist})
+        i = ids.index(id1)
+        j = ids.index(id2)
+        mat[i][j] = dist
+        mat[j][i] = dist
 
-    # Extract unique samples 
-    ids = list(set(d['id1'] for d in dist_long).union(d['id2'] for d in dist_long)) 
-    ids.sort()
-    # Initialize the matrix with zeros 
-    mat = [[0 for _ in ids] for _ in ids]
-
-    # Fill the matrix with distances from the long format data 
-    for entry in dist_long:
-        i = ids.index(entry['id1'])
-        j = ids.index(entry['id2'])
-        mat[i][j] = entry['dist'] 
-        mat[j][i] = entry['dist']
-    
-    mat = np.array(mat)
-    np.fill_diagonal(mat, 0)
+    # If needed, convert matrix to condensed form for further processing
     mat = squareform(mat)
     
     return mat, ids, dist_long
+
+
 
 # Function for assigning clusters using a distance threshold
 def createClusters(data, threshold, start, stage):
@@ -111,6 +106,7 @@ def createClusters(data, threshold, start, stage):
         print('Plot not made!')
         
     return result, max_cluster, dist_long
+
 # Function for condensing sequences
 def condense(data):
     # group by cluster
