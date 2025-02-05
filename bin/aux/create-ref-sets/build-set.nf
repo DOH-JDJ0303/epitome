@@ -11,7 +11,7 @@ workflow {
         .splitCsv(header: true, quote: '"')
         .map{ getChildren(it.run, ['pipeline_info']) }
         .flatten()
-        .map{ getChildren(it), ['ncbi_data','[:]'] }
+        .map{ getChildren(it), ['ncbi-data'] }
         .flatten()
         .set{ ch_input }
     
@@ -52,8 +52,7 @@ workflow {
 
 // Functions
 def getChildren(dir, exclusions){
-    
-    def children = file(dir).list().toList()
+    def children = file(dir, checkIfExists: true).list().toList()
     children = children - exclusions
     return children.collect{ it -> file(dir).resolve( it ) }
 }

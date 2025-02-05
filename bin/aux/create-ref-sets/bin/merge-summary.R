@@ -84,7 +84,7 @@ totSpecies <- function(val){
 }
 
 #----- MAIN -----#
-cols.main <- c('taxon','assembly','segment', 'n_raw','n_qc','accessions','collectionDate', 'species', 'subtype', 'genotype', 'serotype', 'lineage', 'clade', 'biotype', 'subgroup', 'group', 'type', 'geographicRegion', 'organismName_host')
+cols.main <- c('taxon','assembly','segment', 'n_raw','n_qc','accessions','collectionDate', 'species', 'subtype', 'genotype', 'serotype', 'lineage', 'clade', 'biotype', 'subgroup', 'group', 'type','HA_type','NA_type','neighbor','neighbor_ani','geographicRegion', 'organismName_host')
 df.main <- do.call(bind_rows, lapply(list.files(path = "./", recursive = T, pattern = ".csv", full.names = T), FUN = mergeMetadata)) %>%
   filter(assembly != 'failed_qc') %>%
   filter(is.na(condensed)) %>% 
@@ -92,7 +92,7 @@ df.main <- do.call(bind_rows, lapply(list.files(path = "./", recursive = T, patt
   select_if(function(col) !all(is.na(col) | col == ""))
 
 #----- REFERENCE SHEET-----#
-cols.refsheet <- c('taxon','assembly','segment', 'species', 'collectionDate', 'geographicRegion', 'organismName_host', 'subtype', 'genotype', 'serotype', 'lineage', 'clade', 'biotype', 'subgroup', 'group', 'type')
+cols.refsheet <- c('taxon','assembly','segment', 'species', 'collectionDate', 'geographicRegion', 'organismName_host', 'subtype', 'genotype', 'serotype', 'lineage', 'clade', 'biotype', 'subgroup', 'group', 'type', 'HA_type', 'NA_type', 'neighbor', 'neighbor_ani', 'n_raw', 'n_qc')
 df.refsheet <- df.main %>%
   select(any_of(cols.refsheet)) %>%
   drop_na(assembly) %>%

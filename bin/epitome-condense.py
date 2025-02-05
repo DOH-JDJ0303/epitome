@@ -3,7 +3,7 @@
 # epitome-condense.py
 # Author: Jared Johnson, jared.johnson@doh.wa.gov
 
-version = 1.0
+version = 1.1
 start = f"""
 epitome-cluster.py v{version}
 
@@ -71,6 +71,7 @@ def computeMatrix(data):
 
 # Function for assigning clusters using a distance threshold
 def createClusters(data, threshold, start, stage):
+    print(f'{datetime.datetime.now()}: Clustering {len(data.items())} sequences.')
     result = data
     # Compute pairwise ANI
     mat, ids, dist_long = computeMatrix(data)
@@ -100,15 +101,18 @@ def createClusters(data, threshold, start, stage):
         plt.ylabel('Distance')
 
         # Save the plot to a file
-        plt.savefig(f'{args.outdir}/{stage}.png', format='png')
+        plt.savefig(f'{args.outdir}/{stage.replace(" ","_")}.png', format='png')
         plt.close()
     except:
         print('Plot not made!')
+    
+    print(f'{datetime.datetime.now()}: {max_cluster} clusters created.')
         
     return result, max_cluster, dist_long
 
 # Function for condensing sequences
-def condense(data):
+def selectBest(data):
+    print(f'{datetime.datetime.now()}: Selecting best sequences for each cluster.')
     # group by cluster
     clusters = {}
     for key, value in data.items():
@@ -147,7 +151,7 @@ def condense(data):
                 data[id]['condensed'] = ''
             else:
                 data[id]['condensed'] = select_ref[0]
-    return refs, data
+    return list(set(refs)), data
 
 # Function for finding the next closests sequence based on ANI
 def findNeighbor(inclusions, exclusions, dists, data):
@@ -155,6 +159,7 @@ def findNeighbor(inclusions, exclusions, dists, data):
     for pair in dists:
         if pair['id1'] not in exclusions and pair['id2'] not in exclusions:
                 sub_dist.append(pair)
+    closest_neighbor = 0
     for id in inclusions:
         neighbor      = []
         neighbor_dist = 1
@@ -177,9 +182,10 @@ def findNeighbor(inclusions, exclusions, dists, data):
         data[id]['neighbor_ani'] = neighbor_ani
         if neighbor_ani == 0:
             neighbor = []
-            
+        if neighbor_ani > closest_neighbor:
+            closest_neighbor = neighbor_ani
         data[id]['neighbor'] = neighbor
-    return data
+    return data, closest_neighbor
 
 # Function for writing a dictionary to CSV
 def dictToCsv(dicts, filename):
@@ -191,6 +197,24 @@ def dictToCsv(dicts, filename):
         writer = csv.DictWriter(file, fieldnames=keys, quoting=csv.QUOTE_ALL)
         writer.writeheader()
         writer.writerows(dicts)
+
+# Function for condensing sequences
+def condenseSeqs(mhs, threshold, stage):
+    print(f'\n{datetime.datetime.now()}: Stage {stage}')
+
+    # Cluster sequences
+    data, max_cluster, dist_long = createClusters(mhs, threshold, 0, f'condense {stage}')
+    if len(data.items()) == max_cluster:
+        print(f'{datetime.datetime.now()}: Nothing to condense!')
+        status = 'done'
+        refs = data.keys()
+        for key, value in data.items():
+            value['condensed'] = ''
+    else:
+        status = 'not done'
+        refs, data = selectBest(data)
+    
+    return refs, data, dist_long, status
 
 #----- MAIN -----#
 # create a dictionary of sequence supporting each reference
@@ -218,28 +242,33 @@ for record in screed.open(args.fasta):
 ids = list(set(ids))
 print(f'{datetime.datetime.now()}: Loaded {len(minhashes.items())} sequences from {args.fasta}')
 
-# Cluster sequences
-print(f'{datetime.datetime.now()}: Creating clusters')
-data, max_cluster, dist_long = createClusters(minhashes, args.dist_threshold, 0, 'condense')
-print(f'{datetime.datetime.now()}: {len(data.items())} clusters created.')
-if len(data.items()) == max_cluster:
-    print(f'{datetime.datetime.now()}: Nothing to condense!')
-    refs = ids
-    for key, value in data.items():
-        value['condensed'] = ''
-else:
-    print(f'{datetime.datetime.now()}: Condensing references.')
-    refs, data = condense(data)
-    print
+# Perform first round of condensing
+stage = 1
+refs, data, dist_long, status = condenseSeqs(minhashes, args.dist_threshold, 1)
+# Perform subsequent rounds of condsensing, until no longer needed
+while status != 'done':
+    stage += 1
+    subset = {key: data[key] for key in refs if key in data}
+    refs, subset, _, status = condenseSeqs(subset, args.dist_threshold, stage)
+    # update with any newly condensed sequences
+    for key in subset:
+        data[key] = subset[key]
+        # consolidate previously condensed sequences with newly condensed sequences
+        if subset[key]['condensed'] != '':
+            for key2 in data:
+                if data[key2]['condensed'] == key:
+                    print(f'\033[1;35mUpdate ({key2}): {data[key2]["condensed"]} --> {subset[key]["condensed"]}\033[0m')
+                    data[key2]['condensed'] = subset[key]['condensed']
 
-# Create sets of refs and condensed
+# Create sets of refs and condensed sequences
 refs = list(set(refs))
 condensed = list(set([ id for id in ids if id not in refs ]))
-print(f'{datetime.datetime.now()}: Finding next closest neighbors')
+print(f'\n{datetime.datetime.now()}: Finding next closest neighbors')
 # Find next closest neighbor(s)
-data = findNeighbor(refs, condensed, dist_long, data)
+data, closest_neighbor = findNeighbor(refs, condensed, dist_long, data)
 if condensed:
-    data = findNeighbor(condensed, [], dist_long, data)
+    data, _ = findNeighbor(condensed, [], dist_long, data)
+
 # Write results to CSV
 print(f'{datetime.datetime.now()}: Writing file.')
 results = []
@@ -256,6 +285,10 @@ dictToCsv(results, f'{args.outdir}/condensed.csv')
 
 # End
 end = f"""
+Raw: {len(minhashes.items())} seqs
+Condensed: {len(refs)} seqs
+closest Neighbor: {closest_neighbor}% ANI
+
 Results saved to {args.outdir}
 """
 print(end)
