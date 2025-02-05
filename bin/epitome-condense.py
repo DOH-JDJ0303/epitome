@@ -199,11 +199,15 @@ def dictToCsv(dicts, filename):
         writer.writerows(dicts)
 
 # Function for condensing sequences
-def condenseSeqs(mhs, threshold, stage):
+def condenseSeqs(data, threshold, stage):
     print(f'\n{datetime.datetime.now()}: Stage {stage}')
-
-    # Cluster sequences
-    data, max_cluster, dist_long = createClusters(mhs, threshold, 0, f'condense {stage}')
+    if len(data.items()) == 1:
+        print(f'{datetime.datetime.now()}: Only one sequence provided.')
+        max_cluster = 1
+        dist_long = {}
+    else:
+        # Cluster sequences
+        data, max_cluster, dist_long = createClusters(data, threshold, 0, f'condense {stage}')
     if len(data.items()) == max_cluster:
         print(f'{datetime.datetime.now()}: Nothing to condense!')
         status = 'done'
