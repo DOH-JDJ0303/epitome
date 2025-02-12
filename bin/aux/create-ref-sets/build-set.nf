@@ -14,11 +14,6 @@ workflow {
         .map{ getChildren(it), ['ncbi-data'] }
         .flatten()
         .set{ ch_input }
-    
-    // Pull reference genomes
-    PULL_REFS (
-        ch_input.map{ it.resolve('consensus') }.unique()
-    )
 
     // Gather taxon-segment summaries
     ch_input
@@ -29,6 +24,11 @@ workflow {
     // Merge summaries
     MERGE_SUMMARY (
         ch_summary.collect()
+    )
+    
+    // Pull reference genomes
+    PULL_REFS (
+        ch_input.map{ it.resolve('consensus') }.unique().combine( MERGE_SUMMARY.out.result.map{ csv, md, acc -> csv } )
     )
 
     // Manage excluded sequences
@@ -47,7 +47,6 @@ workflow {
         PULL_REFS.out.result.collect(),
         params.exclusions ? MANAGE_EXCLUSIONS.out.result : []
     )
-
 }
 
 // Functions
@@ -76,14 +75,18 @@ process PULL_REFS {
     tag "${consenus_dir}"
 
     input:
-    path consenus_dir
+    tuple path(consenus_dir), path(refsheet)
 
     output:
     path "references/*", includeInputs: true, emit: result
 
     script:
     """
-    mv consensus references
+    mkdir references
+    for FILE in \$(tail -n +2 ${refsheet} | cut -f 2 -d ',' | tr -d '"')
+    do
+        mv consensus/\$(basename \${FILE}) references/ || true
+    done
     """
 }
 process MANAGE_EXCLUSIONS {
