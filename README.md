@@ -6,7 +6,9 @@ See the [wiki](https://github.com/DOH-JDJ0303/epitome/wiki) for more information
 
 # Quick Start
 ## Step 1. Create your samplesheet
-> [!NOTE] The example below creates a reference set for each taxon using data automatically downloaded from NCBI. It is also possible to supply your own sequence data with or without the NCBI data - learn more [here](https://github.com/DOH-JDJ0303/epitome/wiki).
+> [!NOTE]
+> The example below creates a reference set for each taxon using data automatically downloaded from NCBI. It is also possible to supply your own sequence data with or without the NCBI data - learn more [here](https://github.com/DOH-JDJ0303/epitome/wiki).
+
 `samplesheet.csv`:
 ```
 taxon,segmented,segmentSynonyms
