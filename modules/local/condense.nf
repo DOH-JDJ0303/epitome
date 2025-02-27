@@ -8,7 +8,8 @@ process CONDENSE {
 
     output:
     tuple val(taxon), val(segment), path("${prefix}.condensed.csv"), path("*.fa.gz", includeInputs: true), emit: results
-    // path "versions.yml",                                                                                  emit: versions
+    tuple val(taxon), val(segment), path("condense,png"),                                                  emit: plot, optional: true
+    // path "versions.yml",                                                                                emit: versions
 
 
     when:
@@ -29,9 +30,10 @@ process CONDENSE {
     mv condensed.csv ${prefix}.condensed.csv
     # remove condensed sequences
     rm seqs.fa.gz
+    mkdir condensed
     for s in \$(cat ${prefix}.condensed.csv | tr -d '"' | tail -n +2 | awk -v FS=',' '\$5 != "" {print \$4}' | uniq)
     do
-        rm \${s}.fa.gz
+        mv \${s}.fa.gz condensed/
     done
     """
 }

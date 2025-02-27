@@ -1,8 +1,8 @@
 {
     "$schema": "http://json-schema.org/draft-07/schema",
-    "$id": "https://raw.githubusercontent.com/DOH-JDJ0303/VAPER/master/nextflow_schema.json",
-    "title": "DOH-JDJ0303/VAPER pipeline parameters",
-    "description": "Viral Assembly from Probe-based EnRichment (VAPER)",
+    "$id": "https://raw.githubusercontent.com/nf-core/refmaker/master/nextflow_schema.json",
+    "title": "nf-core/refmaker pipeline parameters",
+    "description": "Pipeline that makes reference genomes for each unique cluster of a species.",
     "type": "object",
     "definitions": {
         "input_output_options": {
@@ -19,17 +19,9 @@
                     "type": "string",
                     "format": "file-path",
                     "exists": true,
-                    "mimetype": "text/csv",
-                    "pattern": "^\\S+\\.csv$",
                     "description": "Path to comma-separated file containing information about the samples in the experiment.",
-                    "help_text": "You will need to create a design file with information about the samples in your experiment before running the pipeline. Use this parameter to specify its location. It has to be a comma-separated file with 3 columns, and a header row.",
+                    "help_text": "You will need to create a design file with information about the samples in your experiment before running the pipeline. Use this parameter to specify its location. It has to be a comma-separated file with 3 columns, and a header row. See [usage docs](https://nf-co.re/refmaker/usage#samplesheet-input).",
                     "fa_icon": "fas fa-file-csv"
-                },
-                "refs": {
-                    "type": "string",
-                    "default": "${baseDir}/assets/reference_sets/1718026015-epitome_95.tar.gz",
-                    "fa_icon": "fas fa-file-csv",
-                    "description": "Path to reference set."
                 },
                 "outdir": {
                     "type": "string",
@@ -37,201 +29,72 @@
                     "description": "The output directory where the results will be saved. You have to use absolute paths to storage on Cloud infrastructure.",
                     "fa_icon": "fas fa-folder-open"
                 },
-                "max_reads": {
-                    "type": "integer",
-                    "default": 2000000,
-                    "description": "Maximum number of reads per sample (R1+R2).",
-                    "fa_icon": "fas fa-glasses"
-                },
                 "email": {
                     "type": "string",
                     "description": "Email address for completion summary.",
                     "fa_icon": "fas fa-envelope",
                     "help_text": "Set this parameter to your e-mail address to get a summary e-mail with details of the run sent to you when the workflow exits. If set in your user config file (`~/.nextflow/config`) then you don't need to specify this on the command line for every run.",
-                    "pattern": "^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$",
-                    "hidden": true
+                    "pattern": "^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$"
                 },
                 "multiqc_title": {
                     "type": "string",
                     "description": "MultiQC report title. Printed as page header, used for filename if not otherwise specified.",
-                    "fa_icon": "fas fa-file-signature",
-                    "hidden": true
+                    "fa_icon": "fas fa-file-signature"
                 }
             }
         },
-        "classification_options_general": {
-            "title": "Classification options: General",
+        "other_options": {
+            "title": "Other options",
             "type": "object",
             "description": "",
             "default": "",
             "properties": {
-                "sm_db": {
-                    "type": "string",
-                    "default": "/home/dev_env/VAPER/general/vaper/assets/databases/genbank-2022.03-viral-k21.zip",
-                    "description": "Path to the sourmash database used for taxonomic classification.",
-                    "fa_icon": "fas fa-database"
-                },
-                "sm_taxa": {
-                    "type": "string",
-                    "default": "/home/dev_env/VAPER/cattle/sourmash/vaper/assets/databases/genbank-2022.03-viral.lineages.csv.gz",
-                    "description": "Path to the file containing lineage information for the sourmash database.",
-                    "fa_icon": "fas fa-database"
-                }
-            },
-            "fa_icon": "fas fa-chart-pie"
-        },
-        "classification_options_reference_selection": {
-            "title": "Classification options: Reference selection",
-            "type": "object",
-            "description": "",
-            "default": "",
-            "properties": {
-                "ref_mode": {
-                    "type": "string",
-                    "default": "accurate",
-                    "description": "Reference selection mode ('accurate' or 'fast'). Accurate mode selects references by aligning contigs from a de novo assembly to the supplied references using Minimap2. Fast mode selects references using Sourmash. Fast mode is experimental and should be used with caution. It is much less accurate and sensitive than the accuracte mode and is only faster when you have a very large number of samples.",
-                    "fa_icon": "fas fa-tachometer-alt"
-                },
-                "ref_genfrac": {
-                    "type": "number",
-                    "default": 0.1,
-                    "description": "Minimum genome fraction used for reference selection. Consensus assemblies will only be generated if proportion of the reference detected in the sample exceeds this value.  This differs from the genome fraction threshold used for the final quality assessment (i.e., --qc_genfrac). In general, this value should be lower than the QC threshold, to account for de novo assembly errors.",
-                    "fa_icon": "fas fa-chart-pie"
-                },
-                "ref_covplot": {
-                    "type": "boolean",
-                    "description": "Experimental feature that creates coverage plots for all mapped references.",
-                    "fa_icon": "fas fa-chart-pie"
-                },
-                "ref_kitchensink": {
-                    "type": "boolean",
-                    "description": "Creates consensus assemblies for all species identified by sourmash. This option automatically downloads reference assemblies from NCBI using the 'datasets' tool. This can create a large number of assemblies and should be used with care.",
-                    "fa_icon": "fas fa-sink"
-                }
-            },
-            "fa_icon": "fas fa-dna"
-        },
-        "classification_options_de_novo_assembly": {
-            "title": "Classification options: De novo assembly",
-            "type": "object",
-            "description": "",
-            "default": "",
-            "properties": {
-                "denovo_assembler": {
-                    "type": "string",
-                    "default": "megahit",
-                    "description": "De novo assembler for Shovill ('spades', 'megahit', 'velvet', 'skesa'')\"",
-                    "fa_icon": "fas fa-puzzle-piece"
-                },
-                "denovo_contigcov": {
-                    "type": "integer",
-                    "default": 1,
-                    "description": "Minimum depth of coverage for a contig to be retained in the de novo assembly.",
-                    "fa_icon": "fas fa-chart-pie"
-                },
-                "denovo_contiglen": {
-                    "type": "integer",
-                    "default": 100,
-                    "description": "Minimum length for a contig to be retained in the de novo assembly.",
-                    "fa_icon": "fas fa-chart-pie"
-                }
-            },
-            "fa_icon": "fas fa-puzzle-piece"
-        },
-        "assembly_options_consensus_assembly": {
-            "title": "Assembly options: Consensus assembly",
-            "type": "object",
-            "description": "",
-            "default": "",
-            "properties": {
-                "cons_assembler": {
-                    "type": "string",
-                    "default": "ivar",
-                    "description": "Consensus assembler ('irma' or 'ivar').",
-                    "fa_icon": "fas fa-puzzle-piece"
-                },
-                "cons_type": {
-                    "type": "string",
-                    "default": "default",
-                    "description": "The consensus assembly version that should be returned: 'plurality', 'amended', or 'padded' (default: 'amended'). This option only applies to IRMA (ignored by iVar).",
-                    "fa_icon": "far fa-copy"
-                },
-                "cons_qual": {
-                    "type": "integer",
-                    "default": 20,
-                    "description": "Minimum allele quality for consensus assembly generation.",
-                    "fa_icon": "fas fa-chart-pie"
-                },
-                "cons_ratio": {
-                    "type": "number",
-                    "default": 0.5,
-                    "description": "Minimum allele support for consensus assembly generation.",
-                    "fa_icon": "fas fa-chart-pie"
-                },
-                "cons_depth": {
-                    "type": "integer",
-                    "default": 30,
-                    "description": "Minimum allele depth for consensus assembly generation.",
-                    "fa_icon": "fas fa-chart-pie"
-                },
-                "cons_amb": {
-                    "type": "string",
-                    "default": "N",
-                    "fa_icon": "fas fa-chart-pie",
-                    "description": "Character used for ambiguous bases ('N', 'DEL', 'REF'). 'DEL' and 'REF' options only apply to IRMA."
-                },
-                "cons_elong": {
-                    "type": "boolean",
-                    "description": "Option to use elongation feature with IRMA. This is ignored for iVar.",
-                    "fa_icon": "fas fa-chart-pie"
-                },
-                "cons_cond_dist": {
+                "dist_threshold": {
                     "type": "number",
                     "default": 0.02,
-                    "description": "The distance threshold used to condense duplicate assemblies (1-%ANI/100). Set this value to 0 if you do not want duplicates condensed.",
-                    "fa_icon": "fas fa-chart-pie"
-                }
-            },
-            "fa_icon": "fas fa-puzzle-piece"
-        },
-        "assembly_options_quality_control": {
-            "title": "Assembly options: Quality control",
-            "type": "object",
-            "description": "",
-            "default": "",
-            "properties": {
-                "qc_depth": {
+                    "description": "Target distance threshold (1-%ANI/100). It is often necessary to add approx. 0.03 to this value to reach the target."
+                },
+                "amb_threshold": {
+                    "type": "number",
+                    "default": 0.02,
+                    "description": "Maximum percent of bases that can be ambiguous (N) in an input sequence."
+                },
+                "len_threshold": {
+                    "type": "number",
+                    "default": 0.2,
+                    "description": "Maximum length difference (+/-) of an input sequence compared to the expected sequence size."
+                },
+                "max_cluster": {
                     "type": "integer",
-                    "default": 30,
-                    "description": "Minimum average depth of coverage used for quality the final quality assessment.",
-                    "fa_icon": "fas fa-chart-pie"
+                    "default": 10000,
+                    "description": "Maximum number of sequences that will be included in the initial clustering step. Increasing this value may result in segmentation faults."
                 },
-                "qc_genfrac": {
-                    "type": "number",
-                    "default": 0.9,
-                    "description": "Minimum genome fraction used for the final quality assessment. This differs from the minimum genome fraction used for reference selection (i.e., --ref_genfrac). In general, this value should be higher than the reference selection threshold.",
-                    "fa_icon": "fas fa-chart-pie"
-                },
-                "nc_miss": {
-                    "type": "number",
-                    "default": 0.1,
-                    "description": "Proportion of the sample consensus genome that can be missing. This is used by Nextclade to assign quality scores.",
-                    "fa_icon": "fas fa-chart-pie"
-                },
-                "nc_miss_bias": {
+                "max_align": {
                     "type": "integer",
-                    "default": 0,
-                    "description": "Number of missing bases that are ignored by Nextclade.",
-                    "fa_icon": "fas fa-chart-pie"
+                    "default": 10000,
+                    "description": "Maximum number of sequences that will be aligned per cluster."
                 },
-                "nc_mixed": {
-                    "type": "number",
-                    "default": 0.0003,
-                    "description": "Proportion of the sample consensus genome that can be a mixed base call. This is used by Nextclade to assign quality scores.",
-                    "fa_icon": "fas fa-chart-pie"
+                "ncbi": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "If data should be pulled from NCBI."
+                },
+                "create": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "If reference should be created."
+                },
+                "ksize": {
+                    "type": "integer",
+                    "default": 31,
+                    "description": "kmer size to use for Sourmash."
+                },
+                "scaled": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Scaled option to use for Sourmash."
                 }
-            },
-            "fa_icon": "fas fa-chart-pie"
+            }
         },
         "reference_genome_options": {
             "title": "Reference genome options",
@@ -243,8 +106,17 @@
                     "type": "string",
                     "description": "Name of iGenomes reference.",
                     "fa_icon": "fas fa-book",
-                    "help_text": "If using a reference genome configured in the pipeline using iGenomes, use this parameter to give the ID for the reference. This is then used to build the full paths for all required reference genome files e.g. `--genome GRCh38`. \n\nSee the [nf-core website docs](https://nf-co.re/usage/reference_genomes) for more details.",
-                    "hidden": true
+                    "help_text": "If using a reference genome configured in the pipeline using iGenomes, use this parameter to give the ID for the reference. This is then used to build the full paths for all required reference genome files e.g. `--genome GRCh38`. \n\nSee the [nf-core website docs](https://nf-co.re/usage/reference_genomes) for more details."
+                },
+                "fasta": {
+                    "type": "string",
+                    "format": "file-path",
+                    "exists": true,
+                    "mimetype": "text/plain",
+                    "pattern": "^\\S+\\.fn?a(sta)?(\\.gz)?$",
+                    "description": "Path to FASTA genome file.",
+                    "help_text": "This parameter is *mandatory* if `--genome` is not specified. If you don't have a BWA index available this will be generated for you automatically. Combine with `--save_reference` to save BWA index for future runs.",
+                    "fa_icon": "far fa-file-code"
                 },
                 "igenomes_ignore": {
                     "type": "boolean",
@@ -462,19 +334,7 @@
             "$ref": "#/definitions/input_output_options"
         },
         {
-            "$ref": "#/definitions/classification_options_general"
-        },
-        {
-            "$ref": "#/definitions/classification_options_reference_selection"
-        },
-        {
-            "$ref": "#/definitions/classification_options_de_novo_assembly"
-        },
-        {
-            "$ref": "#/definitions/assembly_options_consensus_assembly"
-        },
-        {
-            "$ref": "#/definitions/assembly_options_quality_control"
+            "$ref": "#/definitions/other_options"
         },
         {
             "$ref": "#/definitions/reference_genome_options"

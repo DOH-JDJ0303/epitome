@@ -22,8 +22,6 @@ workflow CREATE_SUBWF {
         QUALITY FILTER SEQUENCES
     =============================================================================================================================
     */
-    ch_input
-            .map{ [ it.taxon, it.segment, it.assembly, it.exclusions ] }.view()
     INPUT_QC(
         ch_input
             .map{ [ it.taxon, it.segment, it.assembly, it.exclusions ] }
