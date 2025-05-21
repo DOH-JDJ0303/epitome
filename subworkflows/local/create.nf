@@ -37,12 +37,11 @@ workflow CREATE_SUBWF {
     // MODULE: Split clusters into multi-fasta files
     SEQTK_SUBSEQ(
         ch_clusters
-            .splitCsv(header: true, quote: '"')
-            .transpose()
-            .map{ taxon, segment, data -> [ taxon, segment, data.cluster, data.seq ] }
+            .splitJson()
+            .flatMap{ taxon, segment, data -> data['value'][segment].collect{ i-> [ taxon, segment, i.value['cluster'], i.key ] } }
             .unique()
             .groupTuple(by: [0,1,2])
-            .combine(ch_input_qc, by: [0,1])        
+            .combine(ch_input_qc, by: [0,1])
     )
     ch_versions = ch_versions.mix(SEQTK_SUBSEQ.out.versions.first())
 
@@ -91,7 +90,7 @@ workflow CREATE_SUBWF {
     CONDENSE (
         ch_consensus.join(ch_clusters, by: [0,1])
     )
-    // ch_versions = ch_versions.mix(CONDENSE.out.versions.first())
+    ch_versions = ch_versions.mix(CONDENSE.out.versions.first())
 
     /*
      =============================================================================================================================

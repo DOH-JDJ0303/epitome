@@ -3,12 +3,11 @@ process SUMMARY {
     tag "${prefix}"
 
     input:
-    tuple val(taxon), val(segment), path(input_qc), path(clusters), path(refs), path(metadata)
+    tuple val(taxon), val(segment), path(qc_json), path(clusters_json), path(condensed_json), path(meta_csv)
 
     output:
-    tuple val(taxon), val(segment), path("${prefix}.summary_full.csv"),   emit: full
-    tuple val(taxon), val(segment), path("${prefix}.summary_simple.csv"), emit: simple
-    tuple val(taxon), val(segment), path("${prefix}.summary_taxon.csv"),  emit: taxon
+    tuple val(taxon), val(segment), path("${prefix}.summary.json"),   emit: json
+    tuple val(taxon), val(segment), path("${prefix}.summary.csv"), emit: csv
     path "versions.yml", emit: versions
 
     when:
@@ -18,12 +17,16 @@ process SUMMARY {
     prefix = "${taxon.replaceAll(' ','_')}-${segment}"
     """
     # run script
-    summary.R "${input_qc}" "${clusters}" "${refs}" "${metadata}"
-    mv summary.full.csv ${prefix}.summary_full.csv
-    mv summary.simple.csv ${prefix}.summary_simple.csv
-    mv summary.taxon.csv ${prefix}.summary_taxon.csv
+    epitome-summary.py \\
+        --qc ${qc_json} \\
+        --clusters ${clusters_json} \\
+        --condensed ${condensed_json} \\
+        --meta ${meta_csv}
+
+    mv summary.json ${prefix}.summary.json
+    mv summary.csv ${prefix}.summary.csv
 
     # something about the normal way of getting version info messes with the creations of .command.env
-    echo -e "\\"${task.process}\\":\\n    summary.R: \$(summary.R version)" > versions.yml
+    echo -e "\\"${task.process}\\":\\n    epitome-summary.py: \$(epitome-summary.py --version)" > versions.yml
     """
 }

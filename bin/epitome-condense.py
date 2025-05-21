@@ -3,16 +3,6 @@
 # epitome-condense.py
 # Author: Jared Johnson, jared.johnson@doh.wa.gov
 
-version = 1.1
-start = f"""
-epitome-cluster.py v{version}
-
-Written by Jared Johnson
-jared.johnson@doh.wa.gov
-
-"""
-print(start)
-
 import sourmash
 import screed
 import numpy as np
@@ -20,279 +10,333 @@ from scipy.cluster.hierarchy import dendrogram, linkage, cut_tree
 from scipy.spatial.distance import squareform
 import random
 import csv
-import random
 import datetime
 import argparse
 import matplotlib.pyplot as plt
 import itertools
-
-
-#----- ARGS -----#
-parser = argparse.ArgumentParser()
-parser.add_argument("--fasta", dest="fasta", type=str, help="Path to FASTA file.")
-parser.add_argument("--clusters", dest="clusters", type=str, help="Path to the cluster info.")
-parser.add_argument("--dist_threshold", dest="dist_threshold",  default=0.02, type=float, help="Distance thresholds used to create clusters (1-%ANI/100)(default: 0.02)")
-parser.add_argument("--ksize", dest="ksize",  default=31, type=int, help="kmer size used by Sourmash")
-parser.add_argument("--outdir", dest="outdir",  default='./', type=str, help="Name of outputfile.")
-args = parser.parse_args()
+import json
+import os
+from collections import defaultdict
+import textwrap
 
 #----- FUNCTIONS -----#
-# Function to compute the ANI distance for a pair of items
 def computeDistance(pair, data):
+    """Compute the ANI distance between two sequences identified by a pair of IDs."""
     id1, id2 = pair
-    x = data[id1]['mh'].containment_ani(data[id2]['mh'])
-    return x.dist 
+    return data[id1]['mh'].containment_ani(data[id2]['mh']).dist
+
 
 def computeMatrix(data):
+    """
+    Compute a condensed distance matrix and list of distances for pairwise ANI computations.
+    
+    Returns:
+        - condensed distance matrix (numpy array)
+        - sorted list of sequence IDs
+        - list of dicts with distances for each pair
+    """
+    ids = sorted(data.keys())
+    pairs = list(itertools.combinations(ids, 2))
+    mat = np.zeros((len(ids), len(ids)))
     dist_long = []
 
-    # Get unique and sorted list of IDs
-    ids = sorted(set(data.keys()))
-    # Generate pairwise comparisons
-    pairs = list(itertools.combinations(ids, 2))
-    # Initialize the matrix with zeros
-    mat = np.zeros((len(ids), len(ids)))
-    # Calculate distance
-    for pair in pairs:
-        id1, id2 = pair
-        dist = computeDistance(pair, data)
-        dist_long.append({ 'id1': id1, 'id2': id2, 'dist': dist})
-        i = ids.index(id1)
-        j = ids.index(id2)
-        mat[i][j] = dist
-        mat[j][i] = dist
+    for id1, id2 in pairs:
+        dist = computeDistance((id1, id2), data)
+        dist_long.append({'id1': id1, 'id2': id2, 'dist': dist})
+        i, j = ids.index(id1), ids.index(id2)
+        mat[i, j] = dist
+        mat[j, i] = dist
 
-    # If needed, convert matrix to condensed form for further processing
-    mat = squareform(mat)
+    return squareform(mat), ids, dist_long
+
+
+def createClusters(data, threshold, start, stage, outdir):
+    """
+    Cluster sequences based on a distance threshold using hierarchical clustering.
     
-    return mat, ids, dist_long
+    Returns:
+        dict mapping sequence IDs to cluster labels.
+    """
+    print(f'{datetime.datetime.now()}: Clustering {len(data)} sequences.')
+    clusters_result = data.copy()
 
-
-
-# Function for assigning clusters using a distance threshold
-def createClusters(data, threshold, start, stage):
-    print(f'{datetime.datetime.now()}: Clustering {len(data.items())} sequences.')
-    result = data
-    # Compute pairwise ANI
-    mat, ids, dist_long = computeMatrix(data)
-   
-    # Compute complete-linkage of pairwise ANI
+    mat, ids, _ = computeMatrix(data)
     Z = linkage(mat, method='complete')
+    cluster_labels = cut_tree(Z, height=threshold).flatten()
 
-    # Cut dendrogram at distance threshold
     max_cluster = start
-    clusters = cut_tree(Z, height=threshold).flatten()
-    for index, id in enumerate(ids):
-        cluster = int(clusters[index]) + int(start) + 1
-        result[id]['cluster'] = cluster
-        # Calculate the largest cluster number
-        if cluster > int(max_cluster):
-            max_cluster = cluster
-    
-    try:
-        # Plot the dendrogram
-        plt.figure(figsize=(10, 5))
-        dendro = dendrogram(Z, labels=ids, orientation='left')
+    for idx, seq_id in enumerate(ids):
+        cluster_id = int(cluster_labels[idx]) + start + 1
+        clusters_result[seq_id] = cluster_id
+        max_cluster = max(max_cluster, cluster_id)
 
-        # Draw a horizontal line at the threshold
+    # Plot dendrogram
+    try:
+        plt.figure(figsize=(10, 5))
+        dendrogram(Z, labels=ids, orientation='left')
         plt.axvline(x=threshold, color='r', linestyle='--')
-        plt.title(f'{stage}')
+        plt.title(stage)
         plt.xlabel('Samples')
         plt.ylabel('Distance')
-
-        # Save the plot to a file
-        plt.savefig(f'{args.outdir}/{stage.replace(" ","_")}.png', format='png')
+        os.makedirs(f'{outdir}/windows/', exist_ok=True)
+        plt.savefig(f'{outdir}/windows/{stage.replace(" ", "_")}.png', format='png')
         plt.close()
-    except:
-        print('Plot not made!')
-    
+    except Exception as e:
+        print(f'Plot not made: {e}')
+
     print(f'{datetime.datetime.now()}: {max_cluster} clusters created.')
-        
-    return result, max_cluster, dist_long
+    return clusters_result
 
-# Function for condensing sequences
+
 def selectBest(data):
+    """
+    Select the best representative sequence per cluster based on 'n' and 'length'.
+    
+    Returns:
+        - list of selected reference sequence IDs
+        - updated data with 'condensed' field set for non-reference sequences
+    """
     print(f'{datetime.datetime.now()}: Selecting best sequences for each cluster.')
-    # group by cluster
-    clusters = {}
-    for key, value in data.items():
-        if value['cluster'] in clusters:
-            clusters[value['cluster']].append(key)
-        else:
-            clusters[value['cluster']] = [ key ]
-    # select references for each cluster
-    refs = []
-    for key, value in clusters.items():
-        if len(value) > 1:
-            max_n      = 0
-            max_len    = 0
-            select_ref = []
-            for id in value:
-                if int(data[id]['n']) > max_n:
-                    select_ref = [ id ]
-                    max_n = int(data[id]['n'])
-                elif int(data[id]['n']) == max_n:
-                    select_ref.append(id)
-            if len(select_ref) > 1:
-                select_ref2 = []
-                for id in select_ref:
-                    if int(data[id]['length']) > max_len:
-                        select_ref2 = [ id ]
-                        max_len = int(data[id]['length'])
-                    elif int(data[id]['length'])== max_len:
-                        select_ref2.append(id)
-                select_ref = select_ref2
-            refs.append(select_ref[0])
-        else:
-            select_ref = [ value[0] ]
-        refs.append(select_ref[0])
-        for id in value:
-            if id in refs:
-                data[id]['condensed'] = ''
-            else:
-                data[id]['condensed'] = select_ref[0]
-    return list(set(refs)), data
 
-# Function for finding the next closests sequence based on ANI
-def findNeighbor(inclusions, exclusions, dists, data):
-    sub_dist = []
-    for pair in dists:
-        if pair['id1'] not in exclusions and pair['id2'] not in exclusions:
-                sub_dist.append(pair)
-    closest_neighbor = 0
-    for id in inclusions:
-        neighbor      = []
-        neighbor_dist = 1
-        for pair in sub_dist:
-            if pair['id1'] == id:
-                other_id = pair['id2']
-                dist = pair['dist']
-            elif pair['id2'] == id:
-                other_id = pair['id1']
-                dist = pair['dist']
+    clusters = {}
+    for seq_id, info in data.items():
+        cluster = info.get('cluster')
+        if cluster is not None:
+            clusters.setdefault(cluster, []).append(seq_id)
+
+    refs = []
+    for cluster, members in clusters.items():
+        # Select member with max 'n', then max 'length'
+        max_n = max(int(data[m]['n']) for m in members)
+        candidates = [m for m in members if int(data[m]['n']) == max_n]
+
+        if len(candidates) > 1:
+            max_len = max(int(data[m]['length']) for m in candidates)
+            candidates = [m for m in candidates if int(data[m]['length']) == max_len]
+
+        ref = candidates[0]
+        refs.append(ref)
+
+        # Mark others as condensed to ref
+        for m in members:
+            if m != ref:
+                data[m]['condensed'] = ref
+
+    return refs, data
+
+
+def findNeighbor(queries, exclusions, data):
+    """
+    For each sequence in queries, find its closest neighbor (based on ANI) excluding those in exclusions.
+    
+    Returns:
+        - updated data with 'neighbor_ani' and 'neighbor' fields
+        - highest neighbor ANI found
+    """
+    _, _, dist_long = computeMatrix(data)
+    closest_neighbor_ani = 0
+
+    for seq_id in queries:
+        min_dist = 1
+        neighbors = []
+
+        for pair in dist_long:
+            if seq_id == pair['id1']:
+                other_id, dist = pair['id2'], pair['dist']
+            elif seq_id == pair['id2']:
+                other_id, dist = pair['id1'], pair['dist']
             else:
                 continue
-            if dist < neighbor_dist:
-                neighbor = [ other_id ]
-                neighbor_dist = dist
-            elif dist == neighbor_dist:
-                neighbor.append(other_id)
-        neighbor = list(set(neighbor))
-        neighbor_ani = round(100*(1-neighbor_dist))
-        data[id]['neighbor_ani'] = neighbor_ani
-        if neighbor_ani == 0:
-            neighbor = []
-        if neighbor_ani > closest_neighbor:
-            closest_neighbor = neighbor_ani
-        data[id]['neighbor'] = neighbor
-    return data, closest_neighbor
 
-# Function for writing a dictionary to CSV
-def dictToCsv(dicts, filename):
-    # Get all unique keys
-    keys = ["taxon","segment","cluster","ref","condensed","n","length","neighbor_ani","neighbor"]
+            if dist < min_dist:
+                neighbors = [other_id]
+                min_dist = dist
+            elif dist == min_dist:
+                neighbors.append(other_id)
 
-    # Write to CSV
-    with open(filename, 'w', newline='') as file:
-        writer = csv.DictWriter(file, fieldnames=keys, quoting=csv.QUOTE_ALL)
+        neighbors = list(set(neighbors))
+        ani = round(100 * (1 - min_dist))
+        data[seq_id]['neighbor_ani'] = ani
+        data[seq_id]['neighbor'] = neighbors if ani > 0 else []
+
+        if ani > closest_neighbor_ani:
+            closest_neighbor_ani = ani
+
+    return data, closest_neighbor_ani
+
+
+def dictToCsv(dict_list, filename):
+    """
+    Write a list of dictionaries to a CSV file with specified headers.
+    """
+    headers = ["taxon", "segment", "cluster", "ref", "condensed", "n", "length", "neighbor_ani", "neighbor"]
+
+    with open(filename, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=headers, quoting=csv.QUOTE_ALL)
         writer.writeheader()
-        writer.writerows(dicts)
+        writer.writerows(dict_list)
 
-# Function for condensing sequences
-def condenseSeqs(data, threshold, stage):
-    print(f'\n{datetime.datetime.now()}: Stage {stage}')
-    if len(data.items()) == 1:
-        print(f'{datetime.datetime.now()}: Only one sequence provided.')
-        max_cluster = 1
-        dist_long = {}
-    else:
-        # Cluster sequences
-        data, max_cluster, dist_long = createClusters(data, threshold, 0, f'condense {stage}')
-    if len(data.items()) == max_cluster:
-        print(f'{datetime.datetime.now()}: Nothing to condense!')
-        status = 'done'
-        refs = data.keys()
-        for key, value in data.items():
-            value['condensed'] = ''
-    else:
-        status = 'not done'
-        refs, data = selectBest(data)
+
+def condenseSeqs(windows, data, threshold, stage, outdir):
+    """
+    Perform one stage of condensing sequences by clustering windows and selecting best representatives.
     
-    return refs, data, dist_long, status
+    Returns:
+        - list of references (representative sequence IDs)
+        - updated data dict
+        - status string ('done' or 'not done')
+    """
+    print(f'\n{datetime.datetime.now()}: Stage {stage}')
+    result = data.copy()
+    seq_count = len(data)
 
-#----- MAIN -----#
-# create a dictionary of sequence supporting each reference
-seqs_per_cluster = {}
-with open(args.clusters, newline='') as csvfile: 
-    csvreader = csv.reader(csvfile)
-    header = next(csvreader)
-    cluster_index = header.index('cluster')
-    for row in csvreader:
-        cluster = row[cluster_index]
-        if cluster in seqs_per_cluster:
-            seqs_per_cluster[cluster] += 1
-        else:
-            seqs_per_cluster[cluster] = 1
+    if seq_count == 1:
+        print(f'{datetime.datetime.now()}: Only one sequence provided.')
+        return list(data.keys()), data, 'done'
 
-# Create dictionary of hashes
-minhashes = {}
-ids = []
-for record in screed.open(args.fasta):
-    mh = sourmash.MinHash(n=0, ksize=args.ksize, scaled=1000)
-    mh.add_sequence(record.sequence, True)
-    cluster = record.name.split('-')[2]
-    minhashes[record.name] = { 'mh': mh, 'length': len(record.sequence), 'n': seqs_per_cluster[ cluster ] }
-    ids.append(record.name)
-ids = list(set(ids))
-print(f'{datetime.datetime.now()}: Loaded {len(minhashes.items())} sequences from {args.fasta}')
+    leftover = [k for k, v in result.items() if v.get('condensed', '') == '']
 
-# Perform first round of condensing
-stage = 1
-refs, data, dist_long, status = condenseSeqs(minhashes, args.dist_threshold, 1)
-# Perform subsequent rounds of condsensing, until no longer needed
-while status != 'done':
-    stage += 1
-    subset = {key: data[key] for key in refs if key in data}
-    refs, subset, _, status = condenseSeqs(subset, args.dist_threshold, stage)
-    # update with any newly condensed sequences
-    for key in subset:
-        data[key] = subset[key]
-        # consolidate previously condensed sequences with newly condensed sequences
-        if subset[key]['condensed'] != '':
-            for key2 in data:
-                if data[key2]['condensed'] == key:
-                    print(f'\033[1;35mUpdate ({key2}): {data[key2]["condensed"]} --> {subset[key]["condensed"]}\033[0m')
-                    data[key2]['condensed'] = subset[key]['condensed']
+    for window_key, window_data in windows.items():
+        minhash = {k: window_data[k] for k in leftover if k in window_data}
+        if len(minhash) == seq_count:
+            print(f'{datetime.datetime.now()}: Clustering window {window_key}')
+            window_clusters = createClusters(minhash, threshold, 0, f'{window_key}_{stage}', outdir)
 
-# Create sets of refs and condensed sequences
-refs = list(set(refs))
-condensed = list(set([ id for id in ids if id not in refs ]))
-print(f'\n{datetime.datetime.now()}: Finding next closest neighbors')
-# Find next closest neighbor(s)
-data, closest_neighbor = findNeighbor(refs, condensed, dist_long, data)
-if condensed:
-    data, _ = findNeighbor(condensed, [], dist_long, data)
+            for seq_id, cluster_id in window_clusters.items():
+                if 'cluster' in result[seq_id]:
+                    result[seq_id]['cluster'] = str(result[seq_id]['cluster']) + str(cluster_id)
+                else:
+                    result[seq_id]['cluster'] = str(cluster_id)
 
-# Write results to CSV
-print(f'{datetime.datetime.now()}: Writing file.')
-results = []
-for key, value in data.items():
-    value['ref'] = key
-    ref_name_split = key.split('-')
-    value['taxon'] = ref_name_split[0]
-    value['segment'] = ref_name_split[1]
-    value['cluster'] = ref_name_split[2]
-    del value['mh']
-    results.append(value)
+    clusters = [v['cluster'] for v in result.values() if 'cluster' in v]
+    print(f'{datetime.datetime.now()}: Created {len(set(clusters))} merged clusters!')
 
-dictToCsv(results, f'{args.outdir}/condensed.csv')
+    if len(leftover) == len(set(clusters)):
+        print(f'{datetime.datetime.now()}: Nothing to condense!')
+        return list(result.keys()), result, 'done'
 
-# End
-end = f"""
-Raw: {len(minhashes.items())} seqs
-Condensed: {len(refs)} seqs
-closest Neighbor: {closest_neighbor}% ANI
+    refs, updated_data = selectBest(result)
 
-Results saved to {args.outdir}
-"""
-print(end)
+    # Update condensed info
+    for seq_id, info in updated_data.items():
+        result[seq_id]['condensed'] = info.get('condensed', '')
+
+    # Clean up cluster keys
+    for info in result.values():
+        info.pop('cluster', None)
+
+    return refs, result, 'not done'
+
+def dict2Json(data, taxon, segment, fieldnames, filename):
+    """
+    Restructure flat list of data entries into nested JSON:
+      taxon -> segment -> sequence_id -> metadata fields
+    """
+    print(f'{datetime.datetime.now()}: Writing metrics to {filename}')
+    nested = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+    for key, value in data.items():
+        nested[taxon][segment][key] = { k: value[k] for k in fieldnames }
+
+    with open(filename, 'w') as f:
+        json.dump(nested, f, indent=4)
+
+def main():
+    version = "1.1"
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--fasta", type=str, nargs='+', help="Path to FASTA file.")
+    parser.add_argument("--taxon", default='null', help="Taxon name or 'version'")
+    parser.add_argument("--segment", default='null', help="Segment name")
+    parser.add_argument("--clusters", type=str, help="Path to the cluster info.")
+    parser.add_argument("--dist", default=0.02, type=float,
+                        help="Distance threshold (1-%ANI/100) (default: 0.02)")
+    parser.add_argument("--scaled", default=1000, type=int, help="Scaled value used by Sourmash")
+    parser.add_argument("--ksize", default=31, type=int, help="K-mer size used by Sourmash")
+    parser.add_argument("--window", default=8000, type=int, 
+                        help="Window size to create clusters. Sequences exceeding this will be split.")
+    parser.add_argument("--outdir", default='./', type=str, help="Output directory")
+    parser.add_argument('--version', action='version', version=version)
+    args = parser.parse_args()
+
+    start = f"""
+    epitome-condense.py v{version}
+    Written by Jared Johnson
+    jared.johnson@doh.wa.gov
+    """
+    print(textwrap.dedent(start))
+    os.makedirs(args.outdir, exist_ok=True)
+
+    # Load sequence cluster sizes
+    seqs_per_cluster = {}
+    with open(args.clusters) as f:
+        taxon = json.load(f)
+        for segment in taxon.values():
+            for id in segment.values():
+                for clust in id.values():
+                    cluster = str(clust['cluster'])
+                    seqs_per_cluster[cluster] = seqs_per_cluster.get(cluster, 0) + 1
+
+    # Read FASTA and generate MinHash sketches
+    seqs, data = {}, {}
+    window_size = args.window
+    for fasta_file in args.fasta:
+        for record in screed.open(fasta_file):
+            name, sequence = record.name, record.sequence
+            seqs[name] = sequence
+            length = len(sequence)
+            window_size = min(window_size, length)
+            cluster = name.split('-')[-1]
+            data[name] = {'condensed': '', 'length': length, 'n': seqs_per_cluster[cluster]}
+
+    # Generate MinHash for windows
+    windows, minhashes = {}, {}
+    for name, sequence in seqs.items():
+        seq_len = len(sequence)
+        j = 0
+        mh = sourmash.MinHash(n=0, ksize=args.ksize, scaled=args.scaled)
+        mh.add_sequence(sequence, True)
+        data[name]['mh'] = mh
+        for i in range(window_size - 1, seq_len, window_size):
+            win_mh = sourmash.MinHash(n=0, ksize=args.ksize, scaled=args.scaled)
+            win_mh.add_sequence(sequence[j:(i - 1)], True)
+            minhashes[name] = {'mh': win_mh}
+            window = f'{j}-{i}'
+            windows.setdefault(window, {}).update(minhashes)
+            j = i
+
+    # Perform iterative condensing
+    stage = 1
+    refs, data, status = condenseSeqs(windows, data, args.dist, stage, args.outdir)
+    while status != 'done':
+        stage += 1
+        subset = {k: data[k] for k in refs}
+        refs, subset, status = condenseSeqs(windows, subset, args.dist, stage, args.outdir)
+        for key, value in subset.items():
+            data[key] = value
+            if value['condensed'] != '':
+                for key2, value2 in data.items():
+                    if value2['condensed'] == key:
+                        print(f'Update ({key2}): {value2["condensed"]} --> {value["condensed"]}')
+                        value2['condensed'] = value['condensed']
+
+    # Final processing
+    refs = list(set(refs))
+    condensed = [k for k in data if k not in refs]
+    print(f'Finding next closest neighbors')
+    data, closest_neighbor = findNeighbor(refs, condensed, data)
+    if condensed:
+        data, _ = findNeighbor(condensed, [], data)
+    
+    dict2Json(data, args.taxon, args.segment, ["condensed", "neighbor_ani", "neighbor"], f'{args.outdir}/condensed.json' )
+
+    end = f"""
+    Raw: {len(minhashes)} seqs
+    Condensed: {len(refs)} seqs
+    Closest Neighbor: {closest_neighbor}% ANI
+    
+    Results saved to {args.outdir}
+    """
+    print(textwrap.dedent(end))
+
+if __name__ == "__main__":
+    main()

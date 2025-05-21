@@ -7,9 +7,9 @@ process CONDENSE {
     tuple val(taxon), val(segment), path(seqs), path(clusters)
 
     output:
-    tuple val(taxon), val(segment), path("${prefix}.condensed.csv"), path("*.fa.gz", includeInputs: true), emit: results
-    tuple val(taxon), val(segment), path("condense,png"),                                                  emit: plot, optional: true
-    // path "versions.yml",                                                                                emit: versions
+    tuple val(taxon), val(segment), path("${prefix}.condensed.json"), path("*.fa.gz", includeInputs: true), emit: results
+    tuple val(taxon), val(segment), path("condense.png"),                                                   emit: plot, optional: true
+    path "versions.yml",                                                                                    emit: versions
 
 
     when:
@@ -18,22 +18,38 @@ process CONDENSE {
     script:
     prefix = "${taxon.replaceAll(' ','_')}-${segment}"
     """
-    # combine sequences into single file
-    cat ${seqs} > seqs.fa.gz
+    mkdir condensed || mv condensed/* ./ || true
+
     # run script
     epitome-condense.py \\
-        --fasta seqs.fa.gz \\
+        --taxon ${taxon} \\
+        --segment ${segment} \\
         --clusters ${clusters} \\
-        --dist_threshold ${params.dist_threshold}
-    
-    # rename output
-    mv condensed.csv ${prefix}.condensed.csv
-    # remove condensed sequences
-    rm seqs.fa.gz
-    mkdir condensed
-    for s in \$(cat ${prefix}.condensed.csv | tr -d '"' | tail -n +2 | awk -v FS=',' '\$5 != "" {print \$4}' | uniq)
+        --dist ${params.dist_threshold} \\
+        --window ${params.window_size} \\
+        --ksize ${params.ksize} \\
+        --scaled ${params.scaled} \\
+        --fasta ${seqs}
+
+    # move condensed (not published)
+    for s in \$(cat condensed.json | tr -d '{":\t ' | grep -B 1 "condensed${prefix}" | paste - - - | cut -f 1 | uniq)
     do
-        mv \${s}.fa.gz condensed/
+        dis_file=\${s}.fa.gz
+        echo "Discarding \$dis_file"
+        mv \$dis_file condensed/
     done
+    
+    # update final sequence headers
+    for file in *.fa.gz; do
+    base=\$(basename "\$file" .fa.gz)
+    zcat "\$file" | awk -v prefix="\$base" '{ if (\$0 ~ /^>/) { print ">" prefix } else { print } }' | gzip > tmp.fa.gz
+    mv tmp.fa.gz \$file
+    done
+
+    # rename output
+    mv condensed.json ${prefix}.condensed.json
+
+    # odd stuff going on with versioning
+    echo -e "\\"${task.process}\\":\\n    epitome-condense.py: \$(epitome-condense.py --version)" > versions.yml
     """
 }

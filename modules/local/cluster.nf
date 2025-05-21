@@ -7,8 +7,8 @@ process CLUSTER {
     tuple val(taxon), val(segment), path(seqs)
 
     output:
-    tuple val(taxon), val(segment), path("*.csv"), emit: results
-    path "*.png",        emit: plot, optional: true
+    tuple val(taxon), val(segment), path("*.json"), emit: results
+    path "*.png",                                   emit: plot, optional: true
     // path "versions.yml", emit: versions
 
 
@@ -20,11 +20,16 @@ process CLUSTER {
     """
     epitome-cluster.py \\
         --fasta ${seqs} \\
+        --taxon ${taxon} \\
+        --segment ${segment} \\
         --max_cluster ${params.max_cluster} \\
-        --dist_threshold ${params.dist_threshold} \\
+        --dist ${params.dist_threshold} \\
+        --window ${params.window_size} \\
         --ksize ${params.ksize} \\
         --scaled ${params.scaled}
     
-    mv clusters.csv ${prefix}.clusters.csv
+    mv clusters.json ${prefix}.clusters.json
+
+    echo -e "\\"${task.process}\\":\\n    epitome-cluster.py: \$(epitome-cluster.py --version)" > versions.yml
     """
 }

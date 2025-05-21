@@ -8,7 +8,7 @@ process INPUT_QC {
 
     output:
     tuple val(taxon), val(segment), path("${prefix}.qc.fa.gz"), emit: seqs
-    tuple val(taxon), val(segment), path("${prefix}.qc.csv"),   emit: summary
+    tuple val(taxon), val(segment), path("${prefix}.qc.json"),  emit: summary
     path "versions.yml",                                        emit: versions
 
 
@@ -18,12 +18,17 @@ process INPUT_QC {
     script:
     prefix = "${taxon.replaceAll(' ','_')}-${segment}"
     """
-    # decompress FASTA file, if needed
-    gzip -d ${sequences} || true
     # gather metrics
-    input-qc.R "${taxon}" "${segment}" "${sequences.name.replaceAll(/\.gz$/,'')}" "${params.amb_threshold}" "${params.len_threshold}" "${exclusions}"
+    epitome-qc.py \\
+        --taxon "${taxon}" \\
+        --segment "${segment}" \\
+        --amb_threshold ${params.amb_threshold} \\
+        --len_threshold ${params.len_threshold} \\
+        --fasta "${sequences}"
+
     gzip *.fa
+
     # odd stuff going on with versioning
-    echo -e "\\"${task.process}\\":\\n    input-qc.R: \$(input-qc.R version)" > versions.yml
+    echo -e "\\"${task.process}\\":\\n    epitome-qc.py: \$(epitome-qc.py --version)" > versions.yml
     """
 }

@@ -17,9 +17,9 @@ process CONSENSUS {
     prefix = "${taxon.replaceAll(' ','_')}-${segment}-${cluster}"
     """
     # run script
-    consensus.sh "${prefix}" ${aln}
+    consensus.sh "${cluster}" ${aln}
     # compress
-    gzip ${prefix}.fa
+    mv ${cluster}.fa ${prefix}.fa && gzip ${prefix}.fa
     # collect consensus size info
     length=\$(zcat ${prefix}.fa.gz | grep -v '>' | tr -d '\n\t ' | wc -c)
     echo "${prefix},\${length}" > ${prefix}_length.csv
