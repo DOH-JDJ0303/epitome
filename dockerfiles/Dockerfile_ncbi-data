@@ -1,61 +1,39 @@
-# base image
+# Base image
 FROM ubuntu:jammy
 
-# metadata
-LABEL base.image="ubuntu:jammy"
-LABEL dockerfile.version="2"
-LABEL software="NCBI-Data"
-LABEL software.version="v1.0.0"
-LABEL description="Software for interacting with NCBI APIs"
-LABEL maintainer="Jared Johnson"
-LABEL maintainer.email="jared.johnson@doh.wa.gov"
+# Metadata
+LABEL base.image="ubuntu:jammy" \
+      dockerfile.version="2" \
+      software="NCBI-Data" \
+      software.version="v1.1" \
+      description="Software for interacting with NCBI APIs" \
+      maintainer="Jared Johnson" \
+      maintainer.email="jared.johnson@doh.wa.gov"
 
-# prevents having to enter commands during apt-get install
+# Avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 
-# install dependencies
-RUN apt-get update && apt-get -y --no-install-recommends install \
-    ca-certificates \
-    libssl-dev \
-    zlib1g-dev \
-    libbz2-dev \
-    libreadline-dev \
-    libsqlite3-dev \
-    make \
-    llvm \
-    libncurses5-dev \
-    libncursesw5-dev \
-    libharfbuzz-dev \
-    libfribidi-dev \
-    libcurl4-openssl-dev \
-    libssl-dev \
-    libxml2-dev \
-    xz-utils \
-    tk-dev \
-    libtiff-dev \
-    libffi-dev \
-    liblzma-dev \
-    build-essential \
-    bc \
-    unzip \
-    tar \
-    gzip \
-    curl \
-    wget \
-    jq \
-    bzip2 && \
-    apt-get autoclean && \
+USER root
+
+# Define user home explicitly
+ENV HOME=/root
+
+# Install dependencies
+RUN apt-get update && \
+    apt-get install -y \
+        wget \
+        crun && \
+    apt-get clean && \
     rm -rf /var/lib/apt/lists/*
-    
-# Install NCBI Entrez Direct: E-utilities
-RUN sh -c "$(wget -q https://ftp.ncbi.nlm.nih.gov/entrez/entrezdirect/install-edirect.sh -O -)"
 
-# Install NCBI Datasets
-RUN mkdir $HOME/bin || true
-RUN wget https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/datasets && mv datasets $HOME/bin
-RUN wget https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/dataformat && mv dataformat $HOME/bin
+# Install NCBI Entrez Direct (EDirect)
+RUN bash -c "$(wget -q https://ftp.ncbi.nlm.nih.gov/entrez/entrezdirect/install-edirect.sh -O -)"
 
-# Update path & change permissions
-ENV PATH "/root/edirect:/root/bin:$PATH"
-RUN echo $PATH
-RUN chmod -R +x $HOME/bin/
+# Install NCBI Datasets CLI tools
+RUN mkdir -p $HOME/bin && \
+    wget -q https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/datasets -O $HOME/bin/datasets && \
+    wget -q https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/dataformat -O $HOME/bin/dataformat && \
+    chmod +x $HOME/bin/datasets $HOME/bin/dataformat
+
+# Set PATH
+ENV PATH="$HOME/edirect:$HOME/bin:$PATH"

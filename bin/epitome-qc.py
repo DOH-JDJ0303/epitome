@@ -13,6 +13,7 @@ from collections import defaultdict
 import json
 import datetime
 import textwrap
+import logging
 
 # ---- FUNCTIONS ----
 def loadSeqs(fasta):
@@ -29,7 +30,7 @@ def loadSeqs(fasta):
             "length": len(seq),
             "seqString": seq
         })
-    print(f'{datetime.datetime.now()}: Loaded {len(sequences)} sequences from {fasta}')
+    logging.info(f'Loaded {len(sequences)} sequences from {fasta}')
     return sequences
 
 
@@ -46,7 +47,7 @@ def excludeSeqs(sequences, exclusions):
 
     # Filter out excluded sequences
     sequences = [s for s in sequences if s["accession"] not in excluded_accessions]
-    print(f'{datetime.datetime.now()}: Excluded {start_len - len(sequences)} sequences')
+    logging.info(f'Excluded {start_len - len(sequences)} sequences')
     return sequences
 
 
@@ -73,7 +74,7 @@ def consolidateSeqs(sequences):
             "accessions": accessions
         })
 
-    print(f'{datetime.datetime.now()}: Consolidated from {start_len} to {len(data)} sequences')
+    logging.info(f'Consolidated from {start_len} to {len(data)} sequences')
     return data
 
 def filterSeqs(data, amb_thresh, len_thresh):
@@ -86,7 +87,7 @@ def filterSeqs(data, amb_thresh, len_thresh):
       - Updated data with filter metadata
       - List of sequence IDs that passed all filters
     """
-    print(f'{datetime.datetime.now()}: Applying filters')
+    logging.info(f'Applying filters')
     legal_base_regex = re.compile(r"[-ATCGRYSWKMBDHVN]")  # Allowed base characters
     lengths = [entry["length"] for entry in data]
     median_len = statistics.median(lengths)
@@ -136,7 +137,7 @@ def dict2Fasta(data, inclusions, filename):
     Write only the sequences that passed all filters to a FASTA file.
     Uses the unique numeric `seq` ID as the FASTA header.
     """
-    print(f'{datetime.datetime.now()}: Writing passing sequences to {filename}')
+    logging.info(f'Writing passing sequences to {filename}')
     with open(filename, "w") as fasta_out:
         for entry in data:
             if 'seq' in entry and 'seqString' in entry:
@@ -149,7 +150,7 @@ def dict2Json(data, taxon, segment, fieldnames, filename):
     Restructure flat list of data entries into nested JSON:
       taxon -> segment -> sequence_id -> metadata fields
     """
-    print(f'{datetime.datetime.now()}: Writing metrics to {filename}')
+    logging.info(f'Writing metrics to {filename}')
     nested = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
     for entry in data:
         filtered_entry = {key: value for key, value in entry.items()
@@ -170,6 +171,12 @@ def dict2Csv(data, taxon, segment, fieldnames, filename):
         for entry in data:
             filtered_entry = {key: value for key, value in entry.items() if key in fieldnames}
             writer.writerow(filtered_entry)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 def main():
     version = "1.0"

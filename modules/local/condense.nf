@@ -32,7 +32,7 @@ process CONDENSE {
         --fasta ${seqs}
 
     # move condensed (not published)
-    for s in \$(cat condensed.json | tr -d '{":\t ' | grep -B 1 "condensed${prefix}" | paste - - - | cut -f 1 | uniq)
+    for s in \$(cat *.condensed.json | tr -d '{":\t ' | grep -B 1 "condensed${prefix}" | paste - - - | cut -f 1 | uniq)
     do
         dis_file=\${s}.fa.gz
         echo "Discarding \$dis_file"
@@ -45,9 +45,6 @@ process CONDENSE {
     zcat "\$file" | awk -v prefix="\$base" '{ if (\$0 ~ /^>/) { print ">" prefix } else { print } }' | gzip > tmp.fa.gz
     mv tmp.fa.gz \$file
     done
-
-    # rename output
-    mv condensed.json ${prefix}.condensed.json
 
     # odd stuff going on with versioning
     echo -e "\\"${task.process}\\":\\n    epitome-condense.py: \$(epitome-condense.py --version)" > versions.yml

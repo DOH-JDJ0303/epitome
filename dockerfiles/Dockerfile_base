@@ -1,65 +1,37 @@
-# base image
-FROM ubuntu:jammy
+# Use micromamba base image (very slim and Conda-compatible)
+FROM docker.io/mambaorg/micromamba:1.5.6
 
-# metadata
-LABEL base.image="ubuntu:jammy"
+# Metadata
+LABEL base.image="mambaorg/micromamba:1.5.6"
 LABEL software="EPITOME"
-LABEL software.version="v1.5.0"
-LABEL description="Basic Linux for Running EPITOME Scripts"
-LABEL website="https://github.com/DOH-JDJ0303/bigbacter-nf"
+LABEL software.version="v1.6.0"
+LABEL description="Dependencies for the EPITOME pipeline using micromamba"
+LABEL website="https://github.com/DOH-JDJ0303/epitome"
 LABEL license="Apache 2.0"
 LABEL maintainer="Jared Johnson"
 LABEL maintainer.email="jared.johnson@doh.wa.gov"
 
-# prevents having to enter commands during apt-get install
-ENV DEBIAN_FRONTEND=noninteractive
+USER root
 
-# install dependencies
-RUN apt update && \
-    apt -y --no-install-recommends install \
-    ca-certificates \
-    software-properties-common \
-    libssl-dev \
-    zlib1g-dev \
-    libbz2-dev \
-    libreadline-dev \
-    libsqlite3-dev \
-    make \
-    llvm \
-    libncurses5-dev \
-    libncursesw5-dev \
-    libharfbuzz-dev \
-    libfribidi-dev \
-    libcurl4-openssl-dev \
-    libssl-dev \
-    libxml2-dev \
-    xz-utils \
-    tk-dev \
-    libtiff-dev \
-    libffi-dev \
-    liblzma-dev \
-    build-essential \
-    dirmngr \
-    gpg-agent
+# Set environment and shell
+ENV MAMBA_ROOT_PREFIX=/opt/conda \
+    PATH=/opt/conda/bin:$PATH \
+    DEBIAN_FRONTEND=noninteractive
 
-RUN add-apt-repository "deb https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/" && \
-    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys E298A3A825C0D65DFD57CBB651716619E084DAB9 && \
-    apt update
+# Create environment and install sourmash + R
+RUN micromamba install -y -n base \
+    -c conda-forge -c bioconda \
+    sourmash \
+    r-base=4.4.2 \
+    r-recommended \
+    scikit-learn \
+    && micromamba clean --all --yes
 
-RUN apt -y --no-install-recommends install \
-    bc \
-    unzip \
-    tar \
-    gzip \
-    curl \
-    wget \
-    bzip2 \
-    r-base=4.4.2-1.2204.0 \
-    r-base-dev=4.4.2-1.2204.0 \
-    r-recommended=4.4.2-1.2204.0 && \
-    apt-get autoclean && \
-    rm -rf /var/lib/apt/lists/*
-    
-# R packages
-RUN R -e "install.packages(c('tidyverse', 'phangorn','BiocManager', 'remotes'), repos='https://cran.rstudio.com/')"
-RUN R -e "BiocManager::install('treeio'); BiocManager::install('Biostrings'); BiocManager::install('ggtree')"
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    procps \
+    jq \
+    gawk
+
+# Optionally test install
+RUN sourmash --version && R --version

@@ -19,7 +19,7 @@ process NCBI_DATA {
     args   = task.ext.args ?: ''
     """    
     #---- NCBI Datasets Genome -----#
-    # download
+    # Download virus genomes 
     datasets download virus genome taxon "${taxon}" ${args} && unzip ncbi_dataset.zip
     # clean & compress sequence file
     cat ncbi_dataset/data/genomic.fna | awk '/^>/ {print \$1; next} {print}' | gzip > genomic.fa.gz

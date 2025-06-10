@@ -8,7 +8,7 @@ process CONSENSUS {
 
     output:
     tuple val(taxon), val(segment), path("${prefix}.fa.gz"), emit: fa
-    path "versions.yml",                                    emit: versions
+    path "versions.yml",                                     emit: versions
 
     when:
     task.ext.when == null || task.ext.when

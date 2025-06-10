@@ -6,8 +6,8 @@
 import sourmash
 import screed
 import numpy as np
-from scipy.cluster.hierarchy import dendrogram, linkage, cut_tree
 from scipy.spatial.distance import squareform
+from sklearn.cluster import DBSCAN
 import random
 import csv
 import datetime
@@ -18,6 +18,7 @@ import json
 import os
 from collections import defaultdict
 import textwrap
+import logging
 
 #----- FUNCTIONS -----#
 def computeDistance(pair, data):
@@ -47,46 +48,15 @@ def computeMatrix(data):
         mat[i, j] = dist
         mat[j, i] = dist
 
-    return squareform(mat), ids, dist_long
+    return mat, ids, dist_long
 
 
 def createClusters(data, threshold, start, stage, outdir):
-    """
-    Cluster sequences based on a distance threshold using hierarchical clustering.
-    
-    Returns:
-        dict mapping sequence IDs to cluster labels.
-    """
-    print(f'{datetime.datetime.now()}: Clustering {len(data)} sequences.')
-    clusters_result = data.copy()
-
     mat, ids, _ = computeMatrix(data)
-    Z = linkage(mat, method='complete')
-    cluster_labels = cut_tree(Z, height=threshold).flatten()
-
-    max_cluster = start
-    for idx, seq_id in enumerate(ids):
-        cluster_id = int(cluster_labels[idx]) + start + 1
-        clusters_result[seq_id] = cluster_id
-        max_cluster = max(max_cluster, cluster_id)
-
-    # Plot dendrogram
-    try:
-        plt.figure(figsize=(10, 5))
-        dendrogram(Z, labels=ids, orientation='left')
-        plt.axvline(x=threshold, color='r', linestyle='--')
-        plt.title(stage)
-        plt.xlabel('Samples')
-        plt.ylabel('Distance')
-        os.makedirs(f'{outdir}/windows/', exist_ok=True)
-        plt.savefig(f'{outdir}/windows/{stage.replace(" ", "_")}.png', format='png')
-        plt.close()
-    except Exception as e:
-        print(f'Plot not made: {e}')
-
-    print(f'{datetime.datetime.now()}: {max_cluster} clusters created.')
-    return clusters_result
-
+    db = DBSCAN(eps=threshold, min_samples=1, metric='precomputed').fit(mat)
+    for id, c in zip(ids, db.labels_):
+        data[id]['cluster'] = c
+    return data
 
 def selectBest(data):
     """
@@ -96,7 +66,7 @@ def selectBest(data):
         - list of selected reference sequence IDs
         - updated data with 'condensed' field set for non-reference sequences
     """
-    print(f'{datetime.datetime.now()}: Selecting best sequences for each cluster.')
+    logging.info(f'Selecting best sequences for each cluster.')
 
     clusters = {}
     for seq_id, info in data.items():
@@ -191,7 +161,7 @@ def condenseSeqs(windows, data, threshold, stage, outdir):
     seq_count = len(data)
 
     if seq_count == 1:
-        print(f'{datetime.datetime.now()}: Only one sequence provided.')
+        logging.info(f'Only one sequence provided.')
         return list(data.keys()), data, 'done'
 
     leftover = [k for k, v in result.items() if v.get('condensed', '') == '']
@@ -199,7 +169,7 @@ def condenseSeqs(windows, data, threshold, stage, outdir):
     for window_key, window_data in windows.items():
         minhash = {k: window_data[k] for k in leftover if k in window_data}
         if len(minhash) == seq_count:
-            print(f'{datetime.datetime.now()}: Clustering window {window_key}')
+            logging.info(f'Clustering window {window_key}')
             window_clusters = createClusters(minhash, threshold, 0, f'{window_key}_{stage}', outdir)
 
             for seq_id, cluster_id in window_clusters.items():
@@ -209,10 +179,10 @@ def condenseSeqs(windows, data, threshold, stage, outdir):
                     result[seq_id]['cluster'] = str(cluster_id)
 
     clusters = [v['cluster'] for v in result.values() if 'cluster' in v]
-    print(f'{datetime.datetime.now()}: Created {len(set(clusters))} merged clusters!')
+    logging.info(f'Created {len(set(clusters))} merged clusters!')
 
     if len(leftover) == len(set(clusters)):
-        print(f'{datetime.datetime.now()}: Nothing to condense!')
+        logging.info(f'Nothing to condense!')
         return list(result.keys()), result, 'done'
 
     refs, updated_data = selectBest(result)
@@ -232,13 +202,19 @@ def dict2Json(data, taxon, segment, fieldnames, filename):
     Restructure flat list of data entries into nested JSON:
       taxon -> segment -> sequence_id -> metadata fields
     """
-    print(f'{datetime.datetime.now()}: Writing metrics to {filename}')
+    logging.info(f'Writing metrics to {filename}')
     nested = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
     for key, value in data.items():
         nested[taxon][segment][key] = { k: value[k] for k in fieldnames }
 
     with open(filename, 'w') as f:
         json.dump(nested, f, indent=4)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 def main():
     version = "1.1"
@@ -269,12 +245,9 @@ def main():
     # Load sequence cluster sizes
     seqs_per_cluster = {}
     with open(args.clusters) as f:
-        taxon = json.load(f)
-        for segment in taxon.values():
-            for id in segment.values():
-                for clust in id.values():
-                    cluster = str(clust['cluster'])
-                    seqs_per_cluster[cluster] = seqs_per_cluster.get(cluster, 0) + 1
+        clusters = json.load(f)
+        for cluster, seqs in clusters[args.taxon][args.segment].items():
+            seqs_per_cluster[cluster] = len(seqs)
 
     # Read FASTA and generate MinHash sketches
     seqs, data = {}, {}
@@ -327,7 +300,8 @@ def main():
     if condensed:
         data, _ = findNeighbor(condensed, [], data)
     
-    dict2Json(data, args.taxon, args.segment, ["condensed", "neighbor_ani", "neighbor"], f'{args.outdir}/condensed.json' )
+    prefix = f'{args.taxon}-{args.segment}'
+    dict2Json(data, args.taxon, args.segment, ["condensed", "neighbor_ani", "neighbor"], f'{args.outdir}/{prefix}.condensed.json' )
 
     end = f"""
     Raw: {len(minhashes)} seqs

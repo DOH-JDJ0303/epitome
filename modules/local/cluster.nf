@@ -7,8 +7,10 @@ process CLUSTER {
     tuple val(taxon), val(segment), path(seqs)
 
     output:
-    tuple val(taxon), val(segment), path("*.json"), emit: results
-    path "*.png",                                   emit: plot, optional: true
+    tuple val(taxon), val(segment), path("*.json"),  emit: json
+    tuple val(taxon), val(segment), path("*.multi.fa.gz"), emit: multi, optional: true
+    tuple val(taxon), val(segment), path("*.single.fa.gz"), emit: single, optional: true
+
     // path "versions.yml", emit: versions
 
 
@@ -28,8 +30,6 @@ process CLUSTER {
         --ksize ${params.ksize} \\
         --scaled ${params.scaled}
     
-    mv clusters.json ${prefix}.clusters.json
-
     echo -e "\\"${task.process}\\":\\n    epitome-cluster.py: \$(epitome-cluster.py --version)" > versions.yml
     """
 }

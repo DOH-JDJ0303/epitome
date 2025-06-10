@@ -19,6 +19,6 @@ process MERGE_INPUTS {
     gzip ${assembly.join(' ')} || true
     cat *.gz > ${prefix}.assembly.fa.gz
     # combine metadata
-    merge-tables.R && mv merged.csv ${prefix}.metadata.csv
+    merge_tables.py && mv merged.csv ${prefix}.metadata.csv
     """
 }

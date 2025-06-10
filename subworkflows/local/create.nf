@@ -5,7 +5,6 @@
 include { INPUT_QC        } from '../../modules/local/input-qc'
 include { CLUSTER         } from '../../modules/local/cluster'
 include { SEQTK_LOOSEENDS } from '../../modules/local/seqtk_subseq'
-include { SEQTK_SUBSEQ    } from '../../modules/local/seqtk_subseq'
 include { MAFFT           } from '../../modules/local/mafft'
 include { CONSENSUS       } from '../../modules/local/consensus'
 include { CONDENSE        } from '../../modules/local/condense'
@@ -32,18 +31,7 @@ workflow CREATE_SUBWF {
     CLUSTER (
         ch_input_qc
     )
-    CLUSTER.out.results.set{ ch_clusters }
-
-    // MODULE: Split clusters into multi-fasta files
-    SEQTK_SUBSEQ(
-        ch_clusters
-            .splitJson()
-            .flatMap{ taxon, segment, data -> data['value'][segment].collect{ i-> [ taxon, segment, i.value['cluster'], i.key ] } }
-            .unique()
-            .groupTuple(by: [0,1,2])
-            .combine(ch_input_qc, by: [0,1])
-    )
-    ch_versions = ch_versions.mix(SEQTK_SUBSEQ.out.versions.first())
+    CLUSTER.out.json.set{ ch_clusters }
 
     /*
     =============================================================================================================================
@@ -52,22 +40,23 @@ workflow CREATE_SUBWF {
     */
     // MODULE: Align clustered sequences with mafft - only performed on clusters containing more than one sequence 
     MAFFT(
-        SEQTK_SUBSEQ
+        CLUSTER
             .out
-            .sequences
-            .filter{ taxon, segment, cluster, seqs, n_seq -> n_seq.toInteger() > 1 }
-            .map{ taxon, segment, cluster, seqs, n_seq -> [ taxon, segment, cluster, seqs ] }
+            .multi
+            .transpose()
+            .map{ taxon, segment, seqs -> [ taxon, segment, seqs.simpleName.tokenize('-').last(), seqs ] }
     )
     ch_versions = ch_versions.mix(MAFFT.out.versions.first())
 
     // recombine with singletons (i.e., clusters containing 1 sequence)
-    SEQTK_SUBSEQ
+    CLUSTER
         .out
-        .sequences
-        .filter{ taxon, segment, cluster, seqs, n_seq -> n_seq.toInteger() == 1 }
-        .map{ taxon, segment, cluster, seqs, n_seq -> [ taxon, segment, cluster, seqs ] }
+        .single
+        .transpose()
+        .map{ taxon, segment, seqs -> [ taxon, segment, seqs.simpleName.tokenize('-').last(), seqs ] }
         .concat(MAFFT.out.fa)
         .set{ ch_alignments }
+
     /*
     =============================================================================================================================
         CREATE CONSENSUS 

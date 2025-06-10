@@ -1,88 +1,101 @@
 #!/bin/bash
-version="2.0"
+set -euo pipefail
+
+version="2.1"
 
 # consensus.sh
 # Author: Jared Johnson, jared.johnson@doh.wa.gov
 
-set -o pipefail
+# Show version
+if [[ "${1:-}" == "version" ]]; then
+    echo "${version}"
+    exit 0
+fi
 
-# get version info
-if [ "$1" == "version" ]; then echo "${version}" && exit 0; fi
-
-# input
+# Input args
 NAME=$1
 ALN=$2
 
-# format sequences to single lines, remove headers, and convert all bases to uppercase
-cat ${ALN} | sed 's/>.*$/@&@/g' | tr -d '\n' | tr '@' '\n' | grep -v '>' | tail -n +2 | awk '{print toupper($0)}' > seq.txt
+# Detect if input is gzipped and use appropriate command
+if [[ "${ALN}" == *.gz ]]; then
+    READ_CMD="gunzip -c"
+else
+    READ_CMD="cat"
+fi
 
-# check for unexpected characters
-bad_chars=$(cat seq.txt | tr -d '\-ATCGRYSWKMBDHVN\n')
-if [[ $(echo "${bad_chars}" | wc -c) > 1 ]]
-then
+# Reformat alignment: single-line sequences, uppercase, no headers
+${READ_CMD} "${ALN}" \
+    | sed 's/>.*$/@&@/g' \
+    | tr -d '\n' \
+    | tr '@' '\n' \
+    | grep -v '>' \
+    | tail -n +2 \
+    | awk '{print toupper($0)}' > seq.txt
+
+# Check for illegal characters
+bad_chars=$(tr -d '\-ATCGRYSWKMBDHVN\n' < seq.txt)
+if [[ -n "${bad_chars}" ]]; then
     echo "Error: the alignment contains illegal characters: ${bad_chars}"
     exit 1
-fi 
+fi
 
-# get the alignment length & sequence count
-seq_len=$(cat seq.txt | sed -n 1p | tr -d '\t\r\n ' | wc -c) && echo "Alignment Length: ${seq_len}"
-seq_count=$(cat seq.txt | wc -l) && echo "Number of Sequences: ${seq_count}"
+# Alignment stats
+seq_len=$(sed -n 1p seq.txt | tr -d '\t\r\n ' | wc -c)
+seq_count=$(wc -l < seq.txt)
+echo "Alignment Length: ${seq_len}"
+echo "Number of Sequences: ${seq_count}"
 
-# count the occurance of each base and report the most supported call - choose ties at random
+# Generate site-wise consensus calls
 echo "site,-,A,T,C,G,R,Y,S,W,K,M,B,D,H,V,N,max,call" > site-list.txt
-cat seq.txt \
-    | sed 's/./&\t/g' \
-    | awk -v OFS=',' -v rc=${seq_count} '{for (i=1; i<=NF; i++){
-                                                                if(NR == 1){nx[i] = 0; 
-                                                                            na[i] = 0; 
-                                                                            nt[i] = 0; 
-                                                                            nc[i] = 0; 
-                                                                            ng[i] = 0;
-                                                                            nr[i] = 0;
-                                                                            ny[i] = 0;
-                                                                            ns[i] = 0;
-                                                                            nw[i] = 0;
-                                                                            nk[i] = 0;
-                                                                            nm[i] = 0
-                                                                            nb[i] = 0;
-                                                                            nd[i] = 0;
-                                                                            nh[i] = 0;
-                                                                            nv[i] = 0;
-                                                                            nn[i] = 0}; 
-                                                                if($i == "-"){nx[i]++}; 
-                                                                if($i == "A"){na[i]++}; 
-                                                                if($i == "T"){nt[i]++}; 
-                                                                if($i == "C"){nc[i]++}; 
-                                                                if($i == "G"){ng[i]++};
-                                                                if($i == "R"){nr[i]++; na[i]++; ng[i]++};
-                                                                if($i == "Y"){ny[i]++; nc[i]++; nt[i]++};
-                                                                if($i == "S"){ns[i]++; ng[i]++; nc[i]++};
-                                                                if($i == "W"){nw[i]++; na[i]++; nt[i]++};
-                                                                if($i == "K"){nk[i]++; ng[i]++; nt[i]++};
-                                                                if($i == "M"){nm[i]++; na[i]++; nc[i]++};
-                                                                if($i == "B"){nb[i]++; nc[i]++; ng[i]++; nt[i]++};
-                                                                if($i == "D"){nd[i]++; na[i]++; ng[i]++; nt[i]++};
-                                                                if($i == "H"){nh[i]++; na[i]++; nc[i]++; nt[i]++};
-                                                                if($i == "V"){nv[i]++; na[i]++; nc[i]++; ng[i]++};
-                                                                if($i == "N"){nn[i]++; na[i]++; nt[i]++; nc[i]++; ng[i]++};
-                                                                if(NR == rc){print i,nx[i],na[i],nt[i],nc[i],ng[i],nr[i],ny[i],ns[i],nw[i],nk[i],nm[i],nb[i],nd[i],nh[i],nv[i],nn[i]}}}' \
-    | awk -v FS=',' -v OFS=',' '{max=$2;
-                                 if(max < $3){max=$3}
-                                 if(max < $4){max=$4} 
-                                 if(max < $5){max=$5} 
-                                 if(max < $6){max=$6}; 
-                                 print $0,max }' \
-    | awk -v FS=',' -v OFS=',' 'BEGIN{srand()}
-                                {delete call; 
-                                if ($2 == $18){call[length(call)] = "-"}; 
-                                if ($3 == $18){call[length(call)] = "A"}; 
-                                if ($4 == $18){call[length(call)] = "T"}; 
-                                if ($5 == $18){call[length(call)] = "C"}; 
-                                if ($6 == $18){call[length(call)] = "G"}; 
-                                r=int(rand()*length(call));
-                                print $0,call[r]}' \
-    >> site-list.txt
 
-# save files
-echo ">${NAME}" > ${NAME}.fa
-cat site-list.txt | tail -n +2 | cut -f 19 -d ',' | tr -d '\n -' | sed 's/$/\n/g' >> ${NAME}.fa
+gawk -v OFS=',' -v rc=${seq_count} '
+{
+    for (i = 1; i <= length($0); i++) {
+        base = substr($0, i, 1)
+        a[i]["-"] += (base == "-")
+        a[i]["A"] += (base == "A")
+        a[i]["T"] += (base == "T")
+        a[i]["C"] += (base == "C")
+        a[i]["G"] += (base == "G")
+        a[i]["R"] += (base == "R")
+        a[i]["Y"] += (base == "Y")
+        a[i]["S"] += (base == "S")
+        a[i]["W"] += (base == "W")
+        a[i]["K"] += (base == "K")
+        a[i]["M"] += (base == "M")
+        a[i]["B"] += (base == "B")
+        a[i]["D"] += (base == "D")
+        a[i]["H"] += (base == "H")
+        a[i]["V"] += (base == "V")
+        a[i]["N"] += (base == "N")
+    }
+}
+END {
+    for (i = 1; i <= length(a); i++) {
+        dash = a[i]["-"] + 0
+        A = a[i]["A"] + a[i]["R"] + a[i]["W"] + a[i]["M"] + a[i]["D"] + a[i]["H"] + a[i]["V"] + a[i]["N"]
+        T = a[i]["T"] + a[i]["Y"] + a[i]["W"] + a[i]["K"] + a[i]["B"] + a[i]["D"] + a[i]["H"] + a[i]["N"]
+        C = a[i]["C"] + a[i]["Y"] + a[i]["S"] + a[i]["M"] + a[i]["B"] + a[i]["H"] + a[i]["V"] + a[i]["N"]
+        G = a[i]["G"] + a[i]["R"] + a[i]["S"] + a[i]["K"] + a[i]["B"] + a[i]["D"] + a[i]["V"] + a[i]["N"]
+        max = dash
+        if (A > max) max = A
+        if (T > max) max = T
+        if (C > max) max = C
+        if (G > max) max = G
+
+        # Randomly resolve ties
+        split("", calls)
+        if (dash == max) calls[length(calls)+1] = "-"
+        if (A == max) calls[length(calls)+1] = "A"
+        if (T == max) calls[length(calls)+1] = "T"
+        if (C == max) calls[length(calls)+1] = "C"
+        if (G == max) calls[length(calls)+1] = "G"
+        call = calls[int(rand()*length(calls)) + 1]
+
+        print i, dash, A, T, C, G, a[i]["R"]+0, a[i]["Y"]+0, a[i]["S"]+0, a[i]["W"]+0, a[i]["K"]+0, a[i]["M"]+0, a[i]["B"]+0, a[i]["D"]+0, a[i]["H"]+0, a[i]["V"]+0, a[i]["N"]+0, max, call
+    }
+}' seq.txt >> site-list.txt
+
+# Output consensus
+echo ">${NAME}" > "${NAME}.fa"
+cut -d',' -f19 site-list.txt | tail -n +2 | tr -d '\n -' | sed 's/$/\n/' >> "${NAME}.fa"

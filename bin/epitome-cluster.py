@@ -6,8 +6,8 @@
 import sourmash
 import screed
 import numpy as np
-from scipy.cluster.hierarchy import dendrogram, linkage, cut_tree
 from scipy.spatial.distance import squareform
+from sklearn.cluster import DBSCAN
 import random
 import csv
 import datetime
@@ -18,28 +18,42 @@ import os
 import textwrap
 from collections import defaultdict
 import json
+import logging
+import gzip
+
 
 
 
 # ----- FUNCTIONS ----- #
 def loadSeqs(fasta, ksize, scaled, window_size):
-    seqs, windows = {}, {}
-    for rec in screed.open(fasta):
-        seqs[rec.name] = rec.sequence
-    print(f'{datetime.datetime.now()}: Loaded {len(seqs)} sequences from {fasta}')
-    for k, seq in seqs.items():
-        j, seq_size = 0, len(seq)
-        win_size = min(window_size, seq_size)
-        for i in range(win_size - 1, seq_size, win_size):
+    # Load sequences
+    sequences = {rec.name: rec.sequence for rec in screed.open(fasta)}
+    logging.info(f'Loaded {len(sequences)} sequences from {fasta}')
+    
+    # Initialize windows
+    windows = defaultdict(dict)
+    seq_len = min([ len(v) for v in sequences.values() ])
+    for seq_id, seq in sequences.items():
+        win_size = min(window_size, seq_len)
+        start = 0
+        for end in range(win_size, seq_len + win_size, win_size):
             mh = sourmash.MinHash(n=0, ksize=ksize, scaled=scaled)
-            mh.add_sequence(seq[j:i-1], True)
-            window = f'{j}-{i}'
-            if window not in windows:
-                windows[window] = {}
-            windows[window][k] = {'mh': mh}
-            j = i
-    print(f'{datetime.datetime.now()}: Split sequences into {len(windows.items())}')
-    return seqs, windows
+            mh.add_sequence(seq[start:end], force=True)
+            window_name = f'{start}-{end}'
+            windows[window_name][seq_id] = {'mh': mh}
+            start = end
+    
+    logging.info(f'Split sequences into {len(windows)} windows')
+
+    # Keep only shared windows
+    shared_windows = {
+        w: seqs for w, seqs in windows.items()
+        if len(seqs) == len(sequences)
+    }
+    if len(windows) != len(shared_windows): 
+        logging.info(f'Reduced to {len(shared_windows)} shared windows')
+
+    return shared_windows, sequences
 
 def mainAndRemainder(data, threshold, round):
     if len(data) > threshold:
@@ -77,50 +91,75 @@ def computeMatrix(data):
         i, j = ids.index(d['id1']), ids.index(d['id2'])
         mat[i][j] = mat[j][i] = d['dist']
     np.fill_diagonal(mat, 0)
-    return squareform(mat), ids
+    return mat, ids
 
 def createClusters(data, threshold, start, stage, outdir):
     mat, ids = computeMatrix(data)
-    Z = linkage(mat, method='complete')
-    clusters = cut_tree(Z, height=threshold).flatten()
-    max_cluster = start
-    for i, id in enumerate(ids):
-        c = int(clusters[i]) + start + 1
+    db = DBSCAN(eps=threshold, min_samples=1, metric='precomputed').fit(mat)
+    clusters = [ int(i) + 1 for i in db.labels_ ]
+    max_cluster = max(clusters) + start
+    for id, cluster in zip(ids, clusters):
+        if cluster == 0:
+            c = max_cluster = max_cluster
+        else:
+            c = int(cluster) + start
         data[id]['cluster'] = c
-        max_cluster = max(max_cluster, c)
-    try:
-        os.makedirs(f'{outdir}/windows/', exist_ok=True)
-        plt.figure(figsize=(10, 5))
-        dendrogram(Z, labels=ids, orientation='left')
-        plt.axvline(x=threshold, color='r', linestyle='--')
-        plt.title(f'{stage}')
-        plt.xlabel('Distance')
-        plt.ylabel('Samples')
-        plt.savefig(f'{outdir}/windows/{stage}.png')
-        plt.close()
-    except Exception as e:
-        print(f'Plot not made: {e}')
     return data, max_cluster
 
-def assignClusters(data1, data2, data3, threshold):
-    for k1, v1 in data1.items():
-        for k2, v2 in data2.items():
-            if v1['mh'].containment_ani(v2['mh']).dist < threshold:
+def assignClusters(remainder, reps, data, threshold):
+    min_dist = 1
+    for k1, v1 in remainder.items():
+        for k2, v2 in reps.items():
+            dist = v1['mh'].containment_ani(v2['mh']).dist
+            if dist < threshold and dist < min_dist:
+                min_dist = dist
                 v1['cluster'] = v2['cluster']
-                data3[k1] = v1
-    return data3
+                data[k1] = v1
+    return data
+
+def assignRefs(seq_windows, ref_windows, threshold):
+    _, first_seq = next(iter(seq_windows.items()))
+    _, first_ref = next(iter(ref_windows.items()))
+    window_set = list(set(seq_windows.keys()) & set(ref_windows.keys()))
+    assigned = {}
+    for seq in first_seq.keys():
+        for ref in first_ref.keys():
+            assigned_win = {'reference': ref}
+            for w in window_set:
+                window_dist = seq_windows[w][seq]['mh'].containment_ani(ref_windows[w][ref]['mh']).dist
+                if window_dist >= threshold:
+                    break
+                else:
+                    assigned_win[w] = window_dist
+            else:
+                assigned[seq] = assigned_win
+                break
+
+    logging.info(f'Assigned {len(assigned.keys())} sequences to an existing reference.')
+    with open('ref_assigned.json', 'w') as f:
+        json.dump(assigned, f, indent=2)
+
+    remainder = defaultdict(lambda: defaultdict(dict))
+    n_seqs = 0
+    for window, data in seq_windows.items():
+        for key, value in data.items():
+            if key not in assigned.keys():
+                n_seqs += 1
+                remainder[window][key] = value
+
+    return remainder
 
 def clusterSeqs(data, max_cluster, threshold, round, start, outdir):
     if start != 0:
-        print(f'{datetime.datetime.now()}: Round {round} - Continuing from cluster {start}')
+        logging.info(f'Round {round} - Continuing from cluster {start}')
     if len(data) > 1:
         main, rem = mainAndRemainder(data, max_cluster, round)
-        print(f'{datetime.datetime.now()}: Round {round} - Clustering {len(main)} sequences')
+        logging.info(f'Round {round} - Clustering {len(main)} sequences')
         clusters, last_cluster = createClusters(main, threshold, start, f'main_{round}', outdir)
-        print(f'{datetime.datetime.now()}: Round {round} - Clustered into {last_cluster - start} clusters')
+        logging.info(f'Round {round} - Clustered into {last_cluster - start} clusters')
         if rem:
             reps = selectReps(clusters)
-            print(f'{datetime.datetime.now()}: Round {round} - Assigning {len(rem)} sequences')
+            logging.info(f'Round {round} - Assigning {len(rem)} sequences')
             clusters = assignClusters(rem, reps, clusters, threshold)
         loose = {k: rem[k] for k in rem if k not in clusters}
     else:
@@ -129,30 +168,24 @@ def clusterSeqs(data, max_cluster, threshold, round, start, outdir):
         clusters = data
     return clusters, loose, last_cluster
 
-def dict2Json(data, taxon, segment, filename):
-    """
-    Restructure flat list of data entries into nested JSON:
-      taxon -> segment -> sequence_id -> metadata fields
-    """
-    print(f'{datetime.datetime.now()}: Writing clusters to {filename}')
-    nested = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
-    for entry in data:
-        nested[taxon][segment][entry['seq']] = { 'cluster': entry['cluster'] }
-
-    with open(filename, 'w') as f:
-        json.dump(nested, f, indent=4)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 def main():
     version = "1.1"
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--fasta", type=str, required=True, help="Path to FASTA file.")
+    parser.add_argument("--refs", type=str, required=False, help="Path to existing references.")
     parser.add_argument("--taxon", default='null', help="Taxon name or 'version'")
     parser.add_argument("--segment", default='null', help="Segment name")
-    parser.add_argument("--dist", default=0.05, type=float, help="Distance threshold (1 - ANI/100)")
+    parser.add_argument("--dist", default=0.02, type=float, help="Distance threshold (1 - ANI/100)")
     parser.add_argument("--max_cluster", default=1000, type=int, help="Max sequences in initial clustering round")
     parser.add_argument("--ksize", default=31, type=int, help="K-mer size for Sourmash")
-    parser.add_argument("--scaled", default=1000, type=int, help="Scaled value for Sourmash")
+    parser.add_argument("--scaled", default=10, type=int, help="Scaled value for Sourmash")
     parser.add_argument("--window_size", default=10000, type=int, help="Sequence window size")
     parser.add_argument("--outdir", default='./', type=str, help="Output directory")
     parser.add_argument('--version', action='version', version=version)
@@ -168,27 +201,50 @@ def main():
     print(textwrap.dedent(start))
 
     # Load sequences
-    seqs, windows = loadSeqs(args.fasta, args.ksize, args.scaled, args.window_size)
+    windows, seqs = loadSeqs(args.fasta, args.ksize, args.scaled, args.window_size)
+    
+    # Assign sequences to existing references
+    if args.refs:
+        logging.info(f'Assinging to references')
+        # Load references
+        windows_refs, _ = loadSeqs(args.refs, args.ksize, args.scaled, args.window_size)
+        windows = assignRefs(windows, windows_refs, args.dist)
+
     # Create clusters
     results = {}
     for window, data in windows.items():
-        if len(data) == len(seqs):
-            print(f'{datetime.datetime.now()}: Clustering window {window}')
-            start, round, win_res = 0, 1, {}
-            while data:
-                clusters, data, start = clusterSeqs(data, args.max_cluster, args.dist, f'{window}_{round}', start, args.outdir)
-                win_res.update(clusters)
-                round += 1
-            for sample, info in win_res.items():
-                results[sample] = results.get(sample, '') + ':' + str(info['cluster'])
+        logging.info(f'Clustering window {window}')
+        start, round, win_res = 0, 1, {}
+        while data:
+            clusters, data, start = clusterSeqs(data, args.max_cluster, args.dist, f'{round}_{window}', start, args.outdir)
+            win_res.update(clusters)
+            round += 1
+        for sample, info in win_res.items():
+            results[sample] = results.get(sample, '') + ':' + str(info['cluster'])
 
-    unique, new_id = {}, 1
-    for v in results.values():
-        if v not in unique:
-            unique[v] = new_id
+    unique, new_id, final = {}, 1, defaultdict(lambda: defaultdict(dict))
+    for key, value in results.items():
+        if value not in unique:
+            unique[value] = new_id
             new_id += 1
-    final = [{'seq': k, 'cluster': unique[v]} for k, v in results.items()]
-    dict2Json(final, args.taxon, args.segment, f'{args.outdir}/clusters.json')
+        final[args.taxon][args.segment].setdefault(unique[value], []).append(key)
+
+    # Write clusters to JSON and FASTA
+    prefix = f'{args.taxon}-{args.segment}'
+    with open(f'{args.outdir}/{prefix}.clusters.json', 'w') as f:
+        json.dump(final, f, indent=4)
+
+    for cluster, ids in final[args.taxon][args.segment].items():
+        if len(ids) > 1:
+            var = 'multi'
+        else:
+            var = 'single'
+        prefix_fa = f'{prefix}-{cluster}.{var}'
+        fas = []
+        for id in ids:
+            fas.append(f'>{id}\n{seqs[id]}')
+        with gzip.open(f'{args.outdir}/{prefix_fa}.fa.gz', 'wt') as f:
+            f.write('\n'.join(fas) + '\n')
 
     end = f"""
     Total clusters {new_id - 1}

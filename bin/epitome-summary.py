@@ -11,6 +11,7 @@ import os
 import json
 from collections import defaultdict
 import statistics
+import logging
 
 # ----------------------------
 # File Loading Utilities
@@ -94,16 +95,6 @@ def get_stats(data):
 # ----------------------------
 # Data Processing
 # ----------------------------
-
-def build_cluster_lookup(data_cluster):
-    """Reformat cluster data for quick lookup by cluster ID."""
-    cluster_lookup = defaultdict(lambda: defaultdict(lambda: defaultdict(set)))
-    for taxon, segments in data_cluster.items():
-        for segment, seqs in segments.items():
-            for seq, clust in seqs.items():
-                clust_id = str(clust['cluster'])
-                cluster_lookup[taxon][segment][clust_id].add(seq)
-    return cluster_lookup
 
 def summarize_clusters(data_condensed, cluster_lookup, data_qc, data_meta):
     """Summarize and merge QC, cluster, and metadata information."""
@@ -208,7 +199,7 @@ def write_summary_csv(rows, filename):
         print("No data to write.")
         return
 
-    print(f'{datetime.datetime.now()}: Writing simple metrics to {filename}')
+    logging.info(f'Writing simple metrics to {filename}')
     # Collect all field names from data
     all_fields = set(k for row in rows for k in row.keys())
 
@@ -233,13 +224,19 @@ def write_summary_csv(rows, filename):
 # ----------------------------
 
 def write_json(data, filename):
-    print(f'{datetime.datetime.now()}: Writing full metrics to {filename}')
+    logging.info(f'Writing full metrics to {filename}')
     with open(filename, 'w') as f:
         json.dump(data, f, indent=4)
 
 # ----------------------------
 # Main Function
 # ----------------------------
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 def main():
     version = "1.0"
@@ -263,8 +260,7 @@ def main():
     data_condensed = load_json_files(args.condensed)
     data_meta = load_csv_files(args.meta)
 
-    cluster_lookup = build_cluster_lookup(data_cluster)
-    summarized_data = summarize_clusters(data_condensed, cluster_lookup, data_qc, data_meta)
+    summarized_data = summarize_clusters(data_condensed, data_cluster, data_qc, data_meta)
     remove_keys(summarized_data, keys_to_remove={'seq', 'illegalBases', 'condensed'})
     serializable_res = convert_sets(summarized_data)
     write_json(serializable_res, f'{args.outdir}/summary.json')
