@@ -1,37 +1,72 @@
-# Use micromamba base image (very slim and Conda-compatible)
-FROM docker.io/mambaorg/micromamba:1.5.6
+FROM python:3.11-slim as app
 
-# Metadata
-LABEL base.image="mambaorg/micromamba:1.5.6"
+ARG SOFTWARENAME_VER="1.0.0"
+
+LABEL base.image="python:3.11-slim"
 LABEL software="EPITOME"
-LABEL software.version="v1.6.0"
-LABEL description="Dependencies for the EPITOME pipeline using micromamba"
+LABEL software.version="${SOFTWARENAME_VER}"
+LABEL description="Dependencies for the EPITOME pipeline"
 LABEL website="https://github.com/DOH-JDJ0303/epitome"
 LABEL license="Apache 2.0"
 LABEL maintainer="Jared Johnson"
 LABEL maintainer.email="jared.johnson@doh.wa.gov"
 
-USER root
+# General dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+        wget \
+        curl \
+        pip \
+        procps \
+        jq \
+        libatlas-base-dev \
+        gfortran \
+        liblapack-dev \
+        libblas-dev \
+        pkg-config \
+        libfreetype6-dev \
+        libpng-dev \
+        llvm-dev \
+        libclang-dev \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Set environment and shell
-ENV MAMBA_ROOT_PREFIX=/opt/conda \
-    PATH=/opt/conda/bin:$PATH \
-    DEBIAN_FRONTEND=noninteractive
+# Python dependencies
+RUN python3 -m pip install --upgrade pip \
+    && python3 -m pip install maturin 'matplotlib>=3.3' scikit-learn
 
-# Create environment and install sourmash + R
-RUN micromamba install -y -n base \
-    -c conda-forge -c bioconda \
-    sourmash \
-    r-base=4.4.2 \
-    r-recommended \
-    scikit-learn \
-    && micromamba clean --all --yes
+# Sourmash
+ARG SOURMASH_VER=v4.9.2
+## Rust (for Sourmash)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    && . "$HOME/.cargo/env"
+## From source
+RUN git clone https://github.com/sourmash-bio/sourmash.git -b ${SOURMASH_VER} \
+    && cd sourmash \
+    && python3 -m pip install -e .[dev]
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    procps \
-    jq \
-    gawk
+# NCBI APIs
+## NCBI Entrez Direct (EDirect)
+RUN bash -c "$(wget -q https://ftp.ncbi.nlm.nih.gov/entrez/entrezdirect/install-edirect.sh -O -)"
+# NCBI Datasets CLI tools
+RUN mkdir -p $HOME/bin \
+    && wget -q https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/datasets -O $HOME/bin/datasets \
+    && wget -q https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/dataformat -O $HOME/bin/dataformat \
+    && chmod +x $HOME/bin/datasets $HOME/bin/dataformat
 
-# Optionally test install
-RUN sourmash --version && R --version
+# Update path
+ENV PATH="/root/edirect:/root/bin:$PATH" \
+    LC_ALL=C
+
+# Set default work directory
+WORKDIR /data
+
+# Test the container
+FROM app as test
+
+WORKDIR /test
+
+RUN sourmash --version \
+    && datasets --version \
+    && esearch --help
+
