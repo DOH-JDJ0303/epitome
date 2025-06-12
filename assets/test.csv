@@ -1,4 +1,3 @@
-taxon
-Lomovskayavirus
-Hapunavirus
-Hpunavirus
+taxon,segmented,segmentSynonyms
+Lomovskayavirus,FALSE,
+Reptarenavirus,TRUE,S;L

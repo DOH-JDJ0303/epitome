@@ -38,7 +38,7 @@ def load_csv_files(files):
             reader = csv.reader(f)
             header = next(reader)
             for row in reader:
-                row_data = {header[i]: row[i] for i in range(len(header) - 1)}
+                row_data = {header[i]: row[i] for i in range(len(header))}
                 taxon = row_data['taxon']
                 segment = row_data.get('segment', 'wg')
                 accession = row_data['accession']
