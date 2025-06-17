@@ -11,6 +11,9 @@
 ## based on submission dates. Submission dates for each .fasta time period
 ## have been written into the names of the fasta files. 
 ## original, complete (all 8 segments sequenced) sequences were selected 
+## Download Sequences (DNA) as FASTA using the following header scheme: 
+## Isolate ID | DNA Accession no. | Isolate name | Segment | Segment number
+##############################################################
 ##############################################################
 library(ape)
 library(tidyverse)
