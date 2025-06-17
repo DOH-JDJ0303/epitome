@@ -13,6 +13,9 @@
 ## original, complete (all 8 segments sequenced) sequences were selected 
 ## sequence files were then concatenated into one .fasta 
 ## metadata files are merged together in this R script. 
+## Download Sequences (DNA) as FASTA using the following header scheme: 
+## Isolate ID | DNA Accession no. | Isolate name | Segment | Segment number
+##############################################################
 ##############################################################
 library(tidyverse)
 library(ape)
