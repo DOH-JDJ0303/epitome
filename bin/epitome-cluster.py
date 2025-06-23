@@ -106,15 +106,34 @@ def createClusters(data, threshold, start, stage, outdir):
         data[id]['cluster'] = c
     return data, max_cluster
 
-def assignClusters(remainder, reps, data, threshold):
-    min_dist = 1
+def assignClusters(remainder, reps, data, threshold, margin):
     for k1, v1 in remainder.items():
+        min_dist = 1
+        matches = []
+
         for k2, v2 in reps.items():
-            dist = v1['mh'].containment_ani(v2['mh']).dist
-            if dist < threshold and dist < min_dist:
-                min_dist = dist
+            d1 = v1['mh'].containment_ani(v2['mh']).dist
+            if d1 < threshold:
                 v1['cluster'] = v2['cluster']
                 data[k1] = v1
+                break
+            elif d1 < margin*threshold and d1 <= min_dist:
+                min_dist = d1
+                matches.append( v2['cluster'] )
+
+        if k1 in data:
+            continue
+
+        for cluster in matches:
+            for k3, v3 in data.items():
+                if v3['cluster'] == cluster:
+                    d2 = v1['mh'].containment_ani(v3['mh']).dist
+                    if d2 < threshold:
+                        v1['cluster'] = v3['cluster']
+                        data[k1] = v1
+                        break
+            if k1 in data:
+                break
     return data
 
 def assignRefs(seq_windows, ref_windows, threshold):
@@ -149,7 +168,7 @@ def assignRefs(seq_windows, ref_windows, threshold):
 
     return remainder
 
-def clusterSeqs(data, max_cluster, threshold, round, start, outdir):
+def clusterSeqs(data, max_cluster, threshold, assign_margin, round, start, outdir):
     if start != 0:
         logging.info(f'Round {round} - Continuing from cluster {start}')
     if len(data) > 1:
@@ -160,7 +179,9 @@ def clusterSeqs(data, max_cluster, threshold, round, start, outdir):
         if rem:
             reps = selectReps(clusters)
             logging.info(f'Round {round} - Assigning {len(rem)} sequences')
-            clusters = assignClusters(rem, reps, clusters, threshold)
+            n_pre = len(clusters)
+            clusters = assignClusters(rem, reps, clusters, threshold, assign_margin)
+            logging.info(f'Round {round} - Assiged {len(clusters) - n_pre} sequences')
         loose = {k: rem[k] for k in rem if k not in clusters}
     else:
         loose, last_cluster = {}, start + 1
@@ -183,6 +204,7 @@ def main():
     parser.add_argument("--taxon", default='null', help="Taxon name or 'version'")
     parser.add_argument("--segment", default='null', help="Segment name")
     parser.add_argument("--dist", default=0.02, type=float, help="Distance threshold (1 - ANI/100)")
+    parser.add_argument("--assign_margin", default=2, type=float, help="Distance threshold multiplier when comparing cluster representatives during the assignment phase.")
     parser.add_argument("--max_cluster", default=1000, type=int, help="Max sequences in initial clustering round")
     parser.add_argument("--ksize", default=31, type=int, help="K-mer size for Sourmash")
     parser.add_argument("--scaled", default=10, type=int, help="Scaled value for Sourmash")
@@ -216,7 +238,7 @@ def main():
         logging.info(f'Clustering window {window}')
         start, round, win_res = 0, 1, {}
         while data:
-            clusters, data, start = clusterSeqs(data, args.max_cluster, args.dist, f'{round}_{window}', start, args.outdir)
+            clusters, data, start = clusterSeqs(data, args.max_cluster, args.dist, args.assign_margin, f'{round}_{window}', start, args.outdir)
             win_res.update(clusters)
             round += 1
         for sample, info in win_res.items():
