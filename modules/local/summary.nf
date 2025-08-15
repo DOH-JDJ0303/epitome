@@ -3,30 +3,32 @@ process SUMMARY {
     tag "${prefix}"
 
     input:
-    tuple val(taxon), val(segment), path(qc_json), path(clusters_json), path(condensed_json), path(meta_csv)
+    tuple val(taxon), val(segment), path(qc_json), path(clusters_json), path(meta_csv), val(method)
 
     output:
-    tuple val(taxon), val(segment), path("${prefix}.summary.json"),   emit: json
-    tuple val(taxon), val(segment), path("${prefix}.summary.csv"), emit: csv
-    path "versions.yml", emit: versions
+    tuple val(taxon), val(segment), path("${prefix}.jsonl.gz"),   emit: json
+    path "versions.yml",                                          emit: versions
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
-    prefix = "${taxon.replaceAll(' ','_')}-${segment}"
+    prefix = "${taxon.replaceAll(' ','_')}-${segment}.${method}"
+    script = "epitome_summary.py"
     """
     # run script
-    epitome-summary.py \\
+    ${script} \\
+        --taxon "${taxon}" \\
+        --segment "${segment}" \\
+        --method ${method} \\
         --qc ${qc_json} \\
         --clusters ${clusters_json} \\
-        --condensed ${condensed_json} \\
         --meta ${meta_csv}
 
-    mv summary.json ${prefix}.summary.json
-    mv summary.csv ${prefix}.summary.csv
-
-    # something about the normal way of getting version info messes with the creations of .command.env
-    echo -e "\\"${task.process}\\":\\n    epitome-summary.py: \$(epitome-summary.py --version)" > versions.yml
+    # version info
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        ${script}: "\$(${script} --version 2>&1 | tr -d '\\r')"
+    END_VERSIONS
     """
 }

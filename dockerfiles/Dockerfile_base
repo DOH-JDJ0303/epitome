@@ -1,84 +1,60 @@
 # -----------------------------
 # Build Stage: EPITOME Env
 # -----------------------------
-FROM python:3.11-slim-bullseye as app
+FROM python:3.11-slim-bullseye AS app
 
 ARG SOFTWARENAME_VER="1.0.0"
-ARG SOURMASH_VER="v4.9.2"
+ARG SOURMASH_VER="4.9.2"  # use PyPI version (no leading 'v')
 
-LABEL base.image="python:3.11-slim-bullseye"
-LABEL software="EPITOME"
-LABEL software.version="${SOFTWARENAME_VER}"
-LABEL description="Dependencies for the EPITOME pipeline"
-LABEL website="https://github.com/DOH-JDJ0303/epitome"
-LABEL license="Apache 2.0"
-LABEL maintainer="Jared Johnson"
-LABEL maintainer.email="jared.johnson@doh.wa.gov"
+LABEL org.opencontainers.image.base.name="python:3.11-slim-bullseye" \
+      org.opencontainers.image.title="EPITOME" \
+      org.opencontainers.image.version="${SOFTWARENAME_VER}" \
+      org.opencontainers.image.description="Dependencies for the EPITOME pipeline" \
+      org.opencontainers.image.url="https://github.com/DOH-JDJ0303/epitome" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.authors="Jared Johnson <jared.johnson@doh.wa.gov>"
 
-# Install system dependencies
+ENV DEBIAN_FRONTEND=noninteractive \
+    LC_ALL=C.UTF-8 \
+    LANG=C.UTF-8 \
+    PIP_NO_CACHE_DIR=1
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# System deps (minimal, runtime-friendly)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libatlas-base-dev \
-    gfortran \
-    liblapack-dev \
-    libblas-dev \
-    pkg-config \
-    libfreetype6-dev \
-    libpng-dev \
-    llvm-dev \
-    libclang-dev \
-    git \
-    wget \
-    curl \
-    pip \
-    procps \
-    jq \
-    unzip \
-    gawk \
-    ca-certificates \
-    libcurl4-gnutls-dev \
- && apt-get clean \
- && rm -rf /var/lib/apt/lists/*
+      build-essential \
+      libatlas-base-dev gfortran liblapack-dev libblas-dev \
+      pkg-config \
+      libfreetype6-dev libpng-dev \
+      git curl wget ca-certificates \
+      procps jq unzip gawk \
+      perl gzip less xz-utils bzip2 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip and install Python packages
-RUN python3 -m pip install --no-cache-dir --upgrade pip \
- && python3 -m pip install --no-cache-dir maturin 'matplotlib>=3.3' scikit-learn
+# Python deps (no Rust toolchain needed if we use wheels)
+RUN python -m pip install --upgrade pip && \
+    python -m pip install \
+      "matplotlib>=3.3" \
+      scikit-learn \
+      sourmash==${SOURMASH_VER}
 
-# Install Rust for sourmash
-ENV CARGO_HOME=/root/.cargo \
-    RUSTUP_HOME=/root/.rustup
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | bash -s -- -y
+# NCBI Entrez Direct (EDirect)
+RUN curl -fsSL https://ftp.ncbi.nlm.nih.gov/entrez/entrezdirect/install-edirect.sh | bash
+ENV PATH="/root/edirect:${PATH}"
 
-ENV PATH="$CARGO_HOME/bin:$PATH"
+# NCBI Datasets CLI + dataformat
+RUN install -d -m 0755 /usr/local/bin && \
+    curl -fsSL -o /usr/local/bin/datasets    https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/datasets && \
+    curl -fsSL -o /usr/local/bin/dataformat  https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/dataformat && \
+    chmod +x /usr/local/bin/datasets /usr/local/bin/dataformat
 
-# Install sourmash from source
-RUN git clone --branch "${SOURMASH_VER}" https://github.com/sourmash-bio/sourmash.git /opt/sourmash \
- && cd /opt/sourmash \
- && python3 -m pip install --no-cache-dir -e .[dev]
-
-# Install NCBI Entrez Direct (EDirect)
-RUN mkdir -p /root/edirect \
- && bash -c "$(wget -qO- https://ftp.ncbi.nlm.nih.gov/entrez/entrezdirect/install-edirect.sh)" \
- && chmod +x /root/edirect/*
-
-# Install NCBI Datasets CLI tools
-RUN mkdir -p /root/bin \
- && wget -q https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/datasets -O /root/bin/datasets \
- && wget -q https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/dataformat -O /root/bin/dataformat \
- && chmod +x /root/bin/datasets /root/bin/dataformat
-
-# Set environment
-ENV PATH="/usr/local/bin:/root/.cargo/bin:/root/edirect:/root/bin:$PATH" \
-    LC_ALL=C
-
-# Default workdir
 WORKDIR /data
 
 # -----------------------------
 # Test Stage
 # -----------------------------
-FROM app as test
+FROM app AS test
 WORKDIR /test
-RUN sourmash --version \
- && datasets --version \
- && esearch -db nucleotide -query 'Lomovskayavirus[Organism] AND "complete sequence"[Title]'
+# quick sanity checks
+RUN sourmash --version && datasets --version && esearch -db nucleotide -query 'Lomovskayavirus[Organism] AND "complete sequence"[Title]'

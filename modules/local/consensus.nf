@@ -15,16 +15,17 @@ process CONSENSUS {
 
     script:
     prefix = "${taxon.replaceAll(' ','_')}-${segment}-${cluster}"
+    script = "epitome_consensus.py"
     """
     # run script
-    consensus.sh "${cluster}" ${aln}
-    # compress
-    mv ${cluster}.fa ${prefix}.fa && gzip ${prefix}.fa
-    # collect consensus size info
-    length=\$(zcat ${prefix}.fa.gz | grep -v '>' | tr -d '\n\t ' | wc -c)
-    echo "${prefix},\${length}" > ${prefix}_length.csv
+    ${script} \\
+        --prefix ${prefix} \\
+        --aln ${aln}
 
-    # something about the normal way of getting version info messes with the creations of .command.env
-    echo -e "\\"${task.process}\\":\\n    consensus.sh: \$(consensus.sh version)" > versions.yml
+    # version info
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        ${script}: "\$(${script} --version 2>&1 | tr -d '\\r')"
+    END_VERSIONS
     """
 }

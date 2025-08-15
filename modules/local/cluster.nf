@@ -7,11 +7,10 @@ process CLUSTER {
     tuple val(taxon), val(segment), path(seqs)
 
     output:
-    tuple val(taxon), val(segment), path("*.json"),  emit: json
-    tuple val(taxon), val(segment), path("*.multi.fa.gz"), emit: multi, optional: true
+    tuple val(taxon), val(segment), path("*.jsonl.gz"),     emit: json
+    tuple val(taxon), val(segment), path("*.multi.fa.gz"),  emit: multi, optional: true
     tuple val(taxon), val(segment), path("*.single.fa.gz"), emit: single, optional: true
-
-    // path "versions.yml", emit: versions
+    path "versions.yml",                                    emit: versions
 
 
     when:
@@ -19,17 +18,23 @@ process CLUSTER {
 
     script:
     prefix = "${taxon.replaceAll(' ','_')}-${segment}"
+    script = "epitome_cluster.py"
     """
-    epitome-cluster.py \\
+    ${script} \\
         --fasta ${seqs} \\
         --taxon ${taxon} \\
         --segment ${segment} \\
         --max_cluster ${params.max_cluster} \\
         --dist ${params.dist_threshold} \\
-        --window ${params.window_size} \\
+        --window_size ${params.window_size} \\
         --ksize ${params.ksize} \\
-        --scaled ${params.scaled}
+        --scaled ${params.scaled} \\
+        ${params.centroid ? '--centroid' : ''}
     
-    echo -e "\\"${task.process}\\":\\n    epitome-cluster.py: \$(epitome-cluster.py --version)" > versions.yml
+    # version info
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        ${script}: "\$(${script} --version 2>&1 | tr -d '\\r')"
+    END_VERSIONS
     """
 }

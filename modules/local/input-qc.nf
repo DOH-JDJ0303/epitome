@@ -7,9 +7,9 @@ process INPUT_QC {
     tuple val(taxon), val(segment), path(sequences), path(exclusions)
 
     output:
-    tuple val(taxon), val(segment), path("${prefix}.qc.fa.gz"), emit: seqs
-    tuple val(taxon), val(segment), path("${prefix}.qc.json"),  emit: summary
-    path "versions.yml",                                        emit: versions
+    tuple val(taxon), val(segment), path("${prefix}.qc.fa.gz"),    emit: seqs
+    tuple val(taxon), val(segment), path("${prefix}.qc.jsonl.gz"), emit: summary
+    path "versions.yml",                                           emit: versions
 
 
     when:
@@ -17,18 +17,19 @@ process INPUT_QC {
 
     script:
     prefix = "${taxon.replaceAll(' ','_')}-${segment}"
+    script = "epitome_qc.py"
     """
-    # gather metrics
-    epitome-qc.py \\
+    ${script} \\
         --taxon "${taxon}" \\
         --segment "${segment}" \\
         --amb_threshold ${params.amb_threshold} \\
         --len_threshold ${params.len_threshold} \\
         --fasta "${sequences}"
 
-    gzip *.fa
-
-    # odd stuff going on with versioning
-    echo -e "\\"${task.process}\\":\\n    epitome-qc.py: \$(epitome-qc.py --version)" > versions.yml
+    # version info
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        ${script}: "\$(${script} --version 2>&1 | tr -d '\\r')"
+    END_VERSIONS
     """
 }

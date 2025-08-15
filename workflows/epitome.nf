@@ -32,12 +32,8 @@ ch_multiqc_custom_methods_description = params.multiqc_methods_description ? fil
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 include { NCBI_DATA_SUBWF } from '../subworkflows/local/ncbi-data'
+include { MERGE_INPUTS    } from '../modules/local/merge-inputs'
 include { CREATE_SUBWF    } from '../subworkflows/local/create'
-
-
-//
-// SUBWORKFLOW: Consisting of a mix of local and nf-core/modules
-//
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -82,7 +78,9 @@ workflow EPITOME {
                 exclusions: it.containsKey('exclusions') ? ( it.exclusions ? file(it.exclusions, checkIfExists: true) : [] ) : [],
                 ]
                 }
-        .set{ ch_input }
+        .set{ ch_input_full }
+
+        ch_input_full.map{ [ taxon: it.taxon, segment: it.segment, assembly: it.assembly, metadata: it.metadata ] }.set{ ch_input_part }
 
     /*
     =============================================================================================================================
@@ -92,15 +90,36 @@ workflow EPITOME {
     if(params.ncbi){
 
         NCBI_DATA_SUBWF(
-            ch_input
+            ch_input_full
         )
-        ch_versions = ch_versions.mix(NCBI_DATA_SUBWF.out.versions.first())
+        ch_versions = ch_versions.mix(NCBI_DATA_SUBWF.out.versions)
         
         NCBI_DATA_SUBWF
             .out
             .input
-            .set{ ch_input }
+            .concat(ch_input_part.filter{ it.segment && it.assembly })
+            .map{ [ it.taxon, it.segment, it.assembly, it.metadata ] }
+            .groupTuple(by: [0,1])
+            .set{ch_input_part}
     }
+
+    /*
+    =============================================================================================================================
+        MERGE INPUTS
+    =============================================================================================================================
+    */
+    // Reformat and merge inputs (from NCBI and the user)
+    MERGE_INPUTS (
+        ch_input_part
+    )
+    ch_versions = ch_versions.mix(MERGE_INPUTS.out.versions.first())
+    MERGE_INPUTS
+        .out
+        .merged
+        .join( ch_input_full.map{ [ it.taxon, it.segment, it.exclusions ] }, by: [0,1], remainder: true)
+        .filter{ it[2] }
+        .map{ taxon, segment, assembly, metadata, exclusions -> [ taxon: taxon, segment: segment, assembly: assembly, metadata: metadata, exclusions: exclusions ? exclusions : [] ] }
+        .set{ ch_input }
 
     /*
     =============================================================================================================================
@@ -112,7 +131,7 @@ workflow EPITOME {
         CREATE_SUBWF(
             ch_input
         )
-        ch_versions = ch_versions.mix(CREATE_SUBWF.out.versions.first())
+        ch_versions = ch_versions.mix(CREATE_SUBWF.out.versions)
     }
 
 

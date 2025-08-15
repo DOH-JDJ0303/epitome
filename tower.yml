@@ -1,3 +1,5 @@
 reports:
-  "**/*summary*":
-    display: "Summary"
+  "**/inputs/":
+    display: "Inputs"
+  "**/Outputs/":
+    display: "Outputs"
