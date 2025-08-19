@@ -3,7 +3,7 @@
 # -----------------------------
 FROM python:3.11-slim-bullseye AS app
 
-ARG SOFTWARENAME_VER="1.0.0"
+ARG SOFTWARENAME_VER="2.0.0"
 ARG SOURMASH_VER="4.9.2"  # use PyPI version (no leading 'v')
 
 LABEL org.opencontainers.image.base.name="python:3.11-slim-bullseye" \

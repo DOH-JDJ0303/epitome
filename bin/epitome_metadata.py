@@ -22,8 +22,8 @@ from epitome_utils import sanitize_filename, detect_and_read, normalize_keys, lo
 
 LOGGER = logging_config()
 
-STRING_KEYS = ['accession', 'segment', 'taxId']
-YEAR_KEYS    = ['collectionDate']
+STRING_KEYS = ['accession', 'segment', 'tax_id']
+YEAR_KEYS    = ['collection_date']
 MISSING_DATA = ["na", "n/a", "null", "none", "nan"]
 
 # -------------------------------
@@ -39,7 +39,7 @@ def _extract_year(rec: Dict[str, Any]) -> None:
     Returns:
         None
     """
-    year_re = re.compile(r"^\d{4}$")
+    year_re = re.compile(r"^\d{4}")
     for k in YEAR_KEYS:
         v = rec.get(k, None)
         if v:
@@ -96,6 +96,8 @@ def merge_records(
 
     for src_path, recs in inputs:
         for rec in recs:
+
+            rec = normalize_keys(rec)
 
             _coerce_to_str(rec)
             _extract_year(rec)

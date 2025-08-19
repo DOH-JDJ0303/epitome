@@ -16,7 +16,7 @@ process NCBI_DATA {
 
     script:
     args   = task.ext.args ?: ''
-    script = "epitome_ncbi.py"
+    tool = "epitome_ncbi.py"
     """
     mkdir data/ || true
 
@@ -54,7 +54,7 @@ process NCBI_DATA {
         > data/edirect.json
     
     #---- COMBINE ----#
-    ${script} \\
+    ${tool} \\
         --taxon ${taxon.replace(' ', '_')} \\
         --segment_synonyms "${segment_synonyms}" \\
         ${seg_status == 'TRUE' ? '--segmented' : ''} \\
@@ -67,7 +67,7 @@ process NCBI_DATA {
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         ncbi-datasets: \$(datasets --version | sed 's/.*: //g')
-        ${script}: "\$(${script} --version 2>&1 | tr -d '\\r')"
+        ${tool}: "\$(${tool} --version 2>&1 | tr -d '\\r')"
     END_VERSIONS
     """
 }

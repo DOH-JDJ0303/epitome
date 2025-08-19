@@ -18,9 +18,9 @@ process CLUSTER {
 
     script:
     prefix = "${taxon.replaceAll(' ','_')}-${segment}"
-    script = "epitome_cluster.py"
+    tool = "epitome_cluster.py"
     """
-    ${script} \\
+    ${tool} \\
         --fasta ${seqs} \\
         --taxon ${taxon} \\
         --segment ${segment} \\
@@ -34,7 +34,7 @@ process CLUSTER {
     # version info
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        ${script}: "\$(${script} --version 2>&1 | tr -d '\\r')"
+        ${tool}: "\$(${tool} --version 2>&1 | tr -d '\\r')"
     END_VERSIONS
     """
 }

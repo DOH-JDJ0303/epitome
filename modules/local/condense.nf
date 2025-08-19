@@ -16,9 +16,9 @@ process CONDENSE {
 
     script:
     prefix = "${taxon.replaceAll(' ','_')}-${segment}"
-    script = "epitome_condense.py"
+    tool = "epitome_condense.py"
     """
-    ${script} \\
+    ${tool} \\
         --taxon ${taxon} \\
         --segment ${segment} \\
         --clusters ${clusters} \\
@@ -31,7 +31,7 @@ process CONDENSE {
     # version info
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        ${script}: "\$(${script} --version 2>&1 | tr -d '\\r')"
+        ${tool}: "\$(${tool} --version 2>&1 | tr -d '\\r')"
     END_VERSIONS
     """
 }

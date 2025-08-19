@@ -97,36 +97,34 @@ def create_clusters(
 def select_best(data: Dict[str, dict]) -> Dict[str, dict]:
     """
     Select the best representative sequence for each merged cluster.
-
-    Args:
-        data: Mapping of sequence IDs to sequence metadata.
-
-    Returns:
-        Mapping of winning sequence ID to its metadata.
     """
-    logging.info('Selecting best sequence for each merged cluster')
+    LOGGER.info('Selecting best sequence for each merged cluster')
     result = {}
 
-    merged_clusters = defaultdict(list)
-    for cid, info in data.items():
+    # Group seq ids by their merged_cluster key
+    grouped = defaultdict(list)
+    for sid, info in data.items():
         mcid = info.get('merged_cluster')
-        if mcid is not None:
-            merged_clusters[cid].append(cid)
+        if mcid:
+            grouped[mcid].append(sid)
 
-    for cid, ids in merged_clusters.items():
-        candidates = []
+    # For each merged cluster, pick a winner by n, then seqLen
+    for mcid, ids in grouped.items():
+        # highest n wins
         max_n = max(int(data[i]['n']) for i in ids)
         candidates = [i for i in ids if int(data[i]['n']) == max_n]
 
+        # tie-breaker: longest sequence
         if len(candidates) > 1:
             max_len = max(int(data[i]['seqLen']) for i in candidates)
             candidates = [i for i in candidates if int(data[i]['seqLen']) == max_len]
 
         winner = candidates[0]
+        # copy winner and aggregate members from losers
         result[winner] = data[winner]
         for i in ids:
             if i != winner:
-                logging.info(f"Condensing {i} -> {winner}")
+                LOGGER.info(f"Condensing {i} -> {winner}")
                 result[winner]['members'].extend(data[i]['members'])
 
     return result
@@ -154,9 +152,9 @@ def condense_seqs(
     Returns:
         Tuple of (updated data dict, status string: 'done' or 'not done').
     """
-    logging.info(f"Stage {stage} (n = {len(data)})")
+    LOGGER.info(f"Stage {stage} (n = {len(data)})")
     if len(data) == 1:
-        logging.info("Only one sequence – done.")
+        LOGGER.info("Only one sequence - done.")
         return data, 'done'
 
     for win_key, win_data in windows.items():
@@ -168,14 +166,20 @@ def condense_seqs(
                 data[cid]['merged_cluster'] = str(data[cid].get('merged_cluster', '')) + str(mcid)
 
     merged_clusters = [v['merged_cluster'] for v in data.values() if 'merged_cluster' in v]
-    logging.info(f'Created {len(set(merged_clusters))} merged clusters')
+    LOGGER.info(f'Created {len(set(merged_clusters))} merged clusters')
 
     if len(data) == len(set(merged_clusters)):
-        logging.info("Nothing to condense")
+        LOGGER.info("Nothing to condense")
         result, status = data, 'done'
     else:
         result = select_best(data)
-        status = 'not done'
+
+        # stop if nothing reduced to avoid infinite loop
+        if len(result) == len(data):
+            LOGGER.warning("No reduction after selection; stopping to avoid infinite loop.")
+            status = 'done'
+        else:
+            status = 'not done'
 
     for v in result.values():
         v.pop('merged_cluster', None)
@@ -208,7 +212,7 @@ def save_output(
         for row in data:
             json.dump(row, f, sort_keys=True)
             f.write("\n")
-    logging.info(f"Saved metrics to {outfile}")
+    LOGGER.info(f"Saved metrics to {outfile}")
 
 # -------------------------------
 #  MAIN
@@ -261,7 +265,7 @@ def main() -> None:
             }
             window_size = min(window_size, len(seq))
     
-    logging.info(f"Loaded {len(data)} sequences.")
+    LOGGER.info(f"Loaded {len(data)} sequences.")
 
     windows: Dict[str, Dict[str, dict]] = {}
     for cid, info in data.items():

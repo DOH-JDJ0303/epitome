@@ -15,14 +15,14 @@ process MERGE_INPUTS {
 
     script:
     prefix = "${taxon.replaceAll(' ','_')}-${segment}"
-    script = "epitome_metadata.py"
+    tool = "epitome_metadata.py"
     """
     # combine assembly files
     gzip ${assembly.join(' ')} || true
     cat *.gz > ${prefix}.assembly.fa.gz
 
     # combine metadata
-    ${script} \\
+    ${tool} \\
         --taxon "${taxon}" \\
         --segment "${segment}" \\
          ${metadata}
@@ -30,7 +30,7 @@ process MERGE_INPUTS {
     # version info
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        ${script}: "\$(${script} --version 2>&1 | tr -d '\\r')"
+        ${tool}: "\$(${tool} --version 2>&1 | tr -d '\\r')"
     END_VERSIONS
     """
 }

@@ -15,17 +15,17 @@ process CONSENSUS {
 
     script:
     prefix = "${taxon.replaceAll(' ','_')}-${segment}-${cluster}"
-    script = "epitome_consensus.py"
+    tool = "epitome_consensus.py"
     """
     # run script
-    ${script} \\
+    ${tool} \\
         --prefix ${prefix} \\
         --aln ${aln}
 
     # version info
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        ${script}: "\$(${script} --version 2>&1 | tr -d '\\r')"
+        ${tool}: "\$(${tool} --version 2>&1 | tr -d '\\r')"
     END_VERSIONS
     """
 }

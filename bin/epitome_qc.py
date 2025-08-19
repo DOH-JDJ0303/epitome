@@ -78,13 +78,13 @@ def exclude_seqs(sequences: List[Dict[str, Any]], exclusions_path: str) -> List[
 
 
 def consolidate_seqs(sequences: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Group identical sequences, assigning shared seqId and accessions list.
+    """Group identical sequences, assigning shared seq_id and accessions list.
 
     Args:
         sequences: List of sequence records with 'sequence' and 'length'.
 
     Returns:
-        List of consolidated records with keys: seqId (int), sequence (str),
+        List of consolidated records with keys: seq_id (int), sequence (str),
         length (int), accessions (List[str]).
     """
     initial_count = len(sequences)
@@ -94,7 +94,7 @@ def consolidate_seqs(sequences: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         grouped[key].append(s["accession"])
     data = [
         {
-            "seqId": i,
+            "seq_id": i,
             "sequence": key[0],
             "length": key[1],
             "accessions": accessions
@@ -135,12 +135,12 @@ def filter_seqs(data: List[Dict[str, Any]], amb_thresh: float, len_thresh: float
         fail_amb = amb_ratio > amb_thresh
         fail_len = (length < lower) or (length > upper)
 
-        d["illegalBases"] = {"filter": illegal, "value": illegal, "status": test(fail_illegal)}
-        d["ambRatio"] = {"filter": amb_thresh, "value": amb_ratio, "status": test(fail_amb)}
+        d["illegal_bases"] = {"filter": illegal, "value": illegal, "status": test(fail_illegal)}
+        d["amb_ratio"] = {"filter": amb_thresh, "value": amb_ratio, "status": test(fail_amb)}
         d["length"] = {"filter": len_thresh, "value": length, "status": test(fail_len)}
 
         if not (fail_illegal or fail_amb or fail_len):
-            passing_fasta_records.append(f">{d['seqId']}\n{seq}")
+            passing_fasta_records.append(f">{d['seq_id']}\n{seq}")
 
     LOGGER.info(f'{len(passing_fasta_records)} sequences passed all filters')
     return data, passing_fasta_records
@@ -167,7 +167,7 @@ def save_output(json_data: List[Dict[str, Any]], fasta_data: List[str], taxon: s
         for row in json_data:
             out = {
                 k: row.get(k)
-                for k in ["seqId", "illegalBases", "ambRatio", "length", "accessions"]
+                for k in ["seq_id", "illegal_bases", "amb_ratio", "length", "accessions"]
             }
             out.update({"taxon": taxon, "segment": segment})
             f.write(json.dumps(out, sort_keys=True) + "\n")

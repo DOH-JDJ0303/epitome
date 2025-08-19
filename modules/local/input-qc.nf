@@ -17,9 +17,9 @@ process INPUT_QC {
 
     script:
     prefix = "${taxon.replaceAll(' ','_')}-${segment}"
-    script = "epitome_qc.py"
+    tool = "epitome_qc.py"
     """
-    ${script} \\
+    ${tool} \\
         --taxon "${taxon}" \\
         --segment "${segment}" \\
         --amb_threshold ${params.amb_threshold} \\
@@ -29,7 +29,7 @@ process INPUT_QC {
     # version info
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        ${script}: "\$(${script} --version 2>&1 | tr -d '\\r')"
+        ${tool}: "\$(${tool} --version 2>&1 | tr -d '\\r')"
     END_VERSIONS
     """
 }

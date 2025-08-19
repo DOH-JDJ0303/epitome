@@ -14,10 +14,10 @@ process SUMMARY {
 
     script:
     prefix = "${taxon.replaceAll(' ','_')}-${segment}.${method}"
-    script = "epitome_summary.py"
+    tool = "epitome_summary.py"
     """
     # run script
-    ${script} \\
+    ${tool} \\
         --taxon "${taxon}" \\
         --segment "${segment}" \\
         --method ${method} \\
@@ -28,7 +28,7 @@ process SUMMARY {
     # version info
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        ${script}: "\$(${script} --version 2>&1 | tr -d '\\r')"
+        ${tool}: "\$(${tool} --version 2>&1 | tr -d '\\r')"
     END_VERSIONS
     """
 }

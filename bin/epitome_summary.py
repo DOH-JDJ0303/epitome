@@ -138,7 +138,7 @@ def main() -> None:
     os.makedirs(args.outdir, exist_ok=True)
 
     # Load input data using shared helpers
-    qc_data = load_jsonl_gz_by_key(args.qc, "seqId")
+    qc_data = load_jsonl_gz_by_key(args.qc, "seq_id")
     cluster_data = load_jsonl_gz_by_key(args.clusters, "cluster")
     meta_data = load_jsonl_gz_by_key(args.meta, "accession")
 

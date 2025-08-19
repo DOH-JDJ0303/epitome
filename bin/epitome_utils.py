@@ -36,11 +36,10 @@ def sanitize_filename(s: str) -> str:
     return re.sub(r'[^A-Za-z0-9._-]', '_', s)
 
 
-def normalize_keys(d: Mapping[str, Any], lower_keys: bool = False) -> Dict[str, Any]:
-    """Optionally lowercase dict keys (strings only)."""
-    if not lower_keys:
-        return dict(d)
-    return {(k.lower() if isinstance(k, str) else k): v for k, v in d.items()}
+def normalize_keys(d: Mapping[str, Any]) -> Dict[str, Any]:
+    """Lowercase snake format"""
+
+    return {(re.sub(r'([a-z])([A-Z])', r'\1_\2', str(k)).lower()): v for k, v in d.items()}
 
 
 # ---------- Lightweight Symmetric Cache ---------- #
