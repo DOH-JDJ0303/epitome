@@ -173,11 +173,14 @@ def save_output(json_data: List[Dict[str, Any]], fasta_data: List[str], taxon: s
             f.write(json.dumps(out, sort_keys=True) + "\n")
     LOGGER.info(f"Saved QC JSON to {json_file}")
 
-    # Write FASTA
-    fasta_file = f"{prefix}.qc.fa.gz"
-    with gzip.open(fasta_file, 'wt', encoding='utf-8') as f:
-        f.write("\n".join(fasta_data) + "\n")
-    LOGGER.info(f"Saved passing sequences to {fasta_file}")
+    if fasta_data:
+        # Write FASTA
+        fasta_file = f"{prefix}.qc.fa.gz"
+        with gzip.open(fasta_file, 'wt', encoding='utf-8') as f:
+            f.write("\n".join(fasta_data) + "\n")
+        LOGGER.info(f"Saved passing sequences to {fasta_file}")
+    else:
+        LOGGER.info(f"All sequences failed QC. Nothing to save.")
 
 
 # -------------------------------

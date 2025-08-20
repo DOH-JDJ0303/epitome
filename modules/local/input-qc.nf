@@ -7,7 +7,7 @@ process INPUT_QC {
     tuple val(taxon), val(segment), path(sequences), path(exclusions)
 
     output:
-    tuple val(taxon), val(segment), path("${prefix}.qc.fa.gz"),    emit: seqs
+    tuple val(taxon), val(segment), path("${prefix}.qc.fa.gz"),    emit: seqs, optional: true
     tuple val(taxon), val(segment), path("${prefix}.qc.jsonl.gz"), emit: summary
     path "versions.yml",                                           emit: versions
 
