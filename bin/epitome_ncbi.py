@@ -98,29 +98,35 @@ def parse_edirect_json_docsum(edirect_json_obj: Iterable[Mapping]) -> dict[str, 
     return data
 
 
-def extract_taxids(ds_taxa_json: list) -> dict[object, str]:
+def extract_taxids(ds_taxa_json: list[dict]) -> dict[str, str]:
     """Extract a mapping from taxid to species name from NCBI datasets taxonomy JSON."""
     LOGGER.info("Extracting taxid -> species mapping")
-    out: dict[object, str] = {}
-    if not isinstance(ds_taxa_json, list) or not ds_taxa_json or not isinstance(ds_taxa_json[0], dict):
+    out: dict[str, str] = {}
+
+    if not ds_taxa_json or not isinstance(ds_taxa_json[0], dict):
         LOGGER.warning("Unexpected taxonomy JSON structure; returning empty map")
         return out
+
     reports = ds_taxa_json[0].get("reports", [])
     for idx, row in enumerate(reports, 1):
-        species_info = (
-            row.get("taxonomy", {})
-               .get("classification", {})
-               .get("species", {})
-        )
-        if not species_info:
+        taxonomy = row.get("taxonomy", {})
+        name = taxonomy.get("current_scientific_name", {}).get("name")
+        primary_tid = taxonomy.get("tax_id")
+        secondary_tids = taxonomy.get("secondary_tax_ids", [])
+
+        if not name or not primary_tid:
             LOGGER.debug("No species info in report #%d", idx)
             continue
-        tid = species_info.get("id")
-        name = species_info.get("name")
-        if tid and name:
-            out[tid] = name
+
+        tids = [primary_tid] + (secondary_tids if isinstance(secondary_tids, list) else [])
+        for taxid in tids:
+            if str(taxid) in out:
+                LOGGER.debug("Overwriting existing mapping for taxid %s", taxid)
+            out[str(taxid)] = name
+
     LOGGER.info("Extracted %d taxids", len(out))
     return out
+
 
 
 def lineage_to_species_and_taxid(
@@ -132,6 +138,9 @@ def lineage_to_species_and_taxid(
         return None, None
     for item in lineage_list:
         taxid = item.get("taxId")
+        if taxid is None:
+            continue
+        taxid = str(taxid)
         if taxid in taxid_name_map:
             return taxid_name_map[taxid], taxid
     return None, None

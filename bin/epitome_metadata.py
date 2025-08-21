@@ -154,7 +154,7 @@ def drop_na(data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for rec in data:
         for k, v in rec.items():
             if v is None:
-                na_counts[k] = na_counts.get(k, 0)
+                na_counts[k] = na_counts.get(k, 0) + 1
                 if na_counts[k] == n_rec:
                     rm_set.add(k)
     for rec in data:
