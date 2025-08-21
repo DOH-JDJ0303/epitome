@@ -26,22 +26,37 @@ LOGGER = logging_config()
 
 
 # -------------------------------
+#  HELPERS (de-duplicated)
+# -------------------------------
+
+def _distance(
+    a: str,
+    b: str,
+    *,
+    scope: str,
+    mh_map: Dict[str, sourmash.MinHash],
+    cache: DistanceCache
+) -> float:
+    """
+    Cached pairwise distance between two IDs for a given scope ('full' or 'win:XYZ').
+    """
+    cached = cache.get(scope, a, b)
+    if cached is not None:
+        return float(cached)
+    d = mh_map[a].containment_ani(mh_map[b]).dist
+    cache.set(scope, a, b, float(d))
+    return float(d)
+
+
+# -------------------------------
 #  FUNCTIONS
 # -------------------------------
 
 def build_full_minhash_map(seqs: Dict[str, str], ksize: int, scaled: int) -> Dict[str, sourmash.MinHash]:
     """
     Build a MinHash object for each sequence.
-
-    Args:
-        seqs: Mapping of sequence IDs to nucleotide sequences.
-        ksize: K-mer size for MinHash.
-        scaled: Scaling factor for MinHash.
-
-    Returns:
-        Dict mapping sequence ID to sourmash.MinHash object.
     """
-    mh_map = {}
+    mh_map: Dict[str, sourmash.MinHash] = {}
     for sid, s in seqs.items():
         mh = sourmash.MinHash(n=0, ksize=ksize, scaled=scaled)
         mh.add_sequence(s, force=True)
@@ -52,22 +67,11 @@ def build_full_minhash_map(seqs: Dict[str, str], ksize: int, scaled: int) -> Dic
 def load_seqs(fasta: str, ksize: int, scaled: int, window_size: int) -> Tuple[Dict[str, Dict[str, Dict[str, Any]]], Dict[str, str]]:
     """
     Load sequences from FASTA and split into MinHash windows.
-
-    Args:
-        fasta: Path to FASTA file.
-        ksize: K-mer size for MinHash.
-        scaled: Scaling factor for MinHash.
-        window_size: Window length to split sequences.
-
-    Returns:
-        Tuple of:
-            windows: Dict[window_name -> {seq_id -> {"mh": MinHash}}]
-            sequences: Dict[seq_id -> sequence string]
     """
     sequences = {rec.name: rec.sequence for rec in screed.open(fasta)}
     LOGGER.info(f'Loaded {len(sequences)} sequences from {fasta}')
 
-    windows = defaultdict(dict)
+    windows: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
     seq_len = min(len(v) for v in sequences.values())
     for seq_id, seq in sequences.items():
         win_size = min(window_size, seq_len)
@@ -81,10 +85,7 @@ def load_seqs(fasta: str, ksize: int, scaled: int, window_size: int) -> Tuple[Di
 
     LOGGER.info(f'Split sequences into {len(windows)} windows')
 
-    shared_windows = {
-        w: seqs for w, seqs in windows.items()
-        if len(seqs) == len(sequences)
-    }
+    shared_windows = {w: seqs for w, seqs in windows.items() if len(seqs) == len(sequences)}
     if len(windows) != len(shared_windows):
         LOGGER.info(f'Reduced to {len(shared_windows)} shared windows')
 
@@ -94,14 +95,6 @@ def load_seqs(fasta: str, ksize: int, scaled: int, window_size: int) -> Tuple[Di
 def main_and_remainder(data: Dict[str, dict], threshold: int, round_num: int) -> Tuple[Dict[str, dict], Dict[str, dict]]:
     """
     Split a dataset into main and remainder subsets based on threshold.
-
-    Args:
-        data: Mapping of IDs to sequence metadata dicts.
-        threshold: Max number of items in main set.
-        round_num: Current clustering round number.
-
-    Returns:
-        Tuple of main subset and remainder subset.
     """
     if len(data) > threshold:
         random_keys = random.sample(list(data.keys()), threshold)
@@ -122,12 +115,6 @@ def main_and_remainder(data: Dict[str, dict], threshold: int, round_num: int) ->
 def select_reps(data: Dict[str, dict]) -> Dict[str, dict]:
     """
     Select representative sequences for each cluster.
-
-    Args:
-        data: Mapping of IDs to sequence metadata dicts (with 'cluster' key).
-
-    Returns:
-        Dict mapping representative ID to metadata.
     """
     result, seen = {}, set()
     for k, v in data.items():
@@ -140,86 +127,118 @@ def select_reps(data: Dict[str, dict]) -> Dict[str, dict]:
 
 def compute_matrix(data: Dict[str, dict], window_scope: str, dist_cache: DistanceCache) -> Tuple[np.ndarray, List[str]]:
     """
-    Compute pairwise distance matrix for sequences in a window.
-
-    Args:
-        data: Mapping of IDs to dict containing 'mh' key.
-        window_scope: Identifier for caching distances.
-        dist_cache: DistanceCache object.
-
-    Returns:
-        Tuple of (distance matrix, list of IDs in order).
+    Compute pairwise distance matrix for sequences in a window using cached distances.
     """
     ids = sorted(data)
     n = len(ids)
-    mat = np.zeros((n, n))
+    mat = np.zeros((n, n), dtype=float)
+    mh_map = {sid: data[sid]['mh'] for sid in ids}
     for i in range(n):
+        ai = ids[i]
         for j in range(i + 1, n):
-            a, b = ids[i], ids[j]
-            cached = dist_cache.get(window_scope, a, b)
-            if cached is None:
-                d = data[a]['mh'].containment_ani(data[b]['mh']).dist
-                dist_cache.set(window_scope, a, b, d)
-            else:
-                d = cached
+            aj = ids[j]
+            d = _distance(ai, aj, scope=window_scope, mh_map=mh_map, cache=dist_cache)
             mat[i, j] = mat[j, i] = d
-    np.fill_diagonal(mat, 0)
+    np.fill_diagonal(mat, 0.0)
     return mat, ids
 
 
-def create_clusters(data: Dict[str, dict], threshold: float, start: int, stage: str, outdir: str, window_scope: str, dist_cache: DistanceCache) -> Tuple[Dict[str, dict], int]:
+def create_clusters(
+    data: Dict[str, dict],
+    threshold: float,
+    start: int,
+    window_scope: str,
+    dist_cache: DistanceCache,
+    *,
+    min_samples_primary: int = 10,
+    min_samples_secondary: int = 1
+) -> Tuple[Dict[str, dict], int]:
     """
-    Cluster sequences using DBSCAN.
+    Cluster sequences using a two-stage DBSCAN:
+      1) Run DBSCAN over all points with a larger min_samples (min_samples_primary).
+      2) Run DBSCAN over stage-1 noise only with a smaller min_samples (min_samples_secondary).
+    Any remaining noise after stage 2 becomes singleton clusters.
 
-    Args:
-        data: Mapping of IDs to metadata dicts.
-        threshold: Distance threshold for clustering.
-        start: Starting cluster index.
-        stage: Stage name for logging.
-        outdir: Output directory.
-        window_scope: Distance cache scope name.
-        dist_cache: DistanceCache object.
-
-    Returns:
-        Tuple of updated data and last cluster number used.
+    Cluster numbering continues from `start`.
+    Returns (updated_data, last_cluster_id).
     """
     mat, ids = compute_matrix(data, window_scope, dist_cache)
-    db = DBSCAN(eps=threshold, min_samples=1, metric='precomputed').fit(mat)
-    clusters = [int(i) + 1 for i in db.labels_]
-    max_cluster = max(clusters) + start + 1
-    for id_, cluster in zip(ids, clusters):
-        if cluster == 0:
-            max_cluster += 1
-            cluster = max_cluster
-        data[id_]['cluster'] = cluster
-    return data, max_cluster
+    n = len(ids)
+    if n == 0:
+        return data, start
+
+    db1 = DBSCAN(eps=threshold, min_samples=min_samples_primary, metric='precomputed').fit(mat)
+    labels1 = db1.labels_  # -1 for noise, >=0 for clusters
+
+    # Map non-noise labels to consecutive cluster IDs continuing from `start`
+    current_max = start
+    label_map_1: Dict[int, int] = {}
+    for lab in sorted(set(labels1)):
+        if lab == -1:
+            continue
+        current_max += 1
+        label_map_1[lab] = current_max
+
+    # Assign stage-1 non-noise clusters; collect noise indices for stage 2
+    noise_indices: List[int] = []
+    for idx, lab in enumerate(labels1):
+        sid = ids[idx]
+        if lab == -1:
+            noise_indices.append(idx)
+        else:
+            data[sid]['cluster'] = label_map_1[lab]
+
+    # ---- Stage 2: Re-cluster noise only (if any) ----
+    if noise_indices:
+        submat = mat[np.ix_(noise_indices, noise_indices)]
+        subids = [ids[i] for i in noise_indices]
+
+        db2 = DBSCAN(eps=threshold, min_samples=min_samples_secondary, metric='precomputed').fit(submat)
+        labels2 = db2.labels_
+
+        # Map stage-2 non-noise labels to new cluster IDs (continue counting)
+        label_map_2: Dict[int, int] = {}
+        for lab in sorted(set(labels2)):
+            if lab == -1:
+                continue
+            current_max += 1
+            label_map_2[lab] = current_max
+
+        # Assign stage-2 clusters; leftover noise -> singleton clusters
+        for idx2, lab2 in enumerate(labels2):
+            sid = subids[idx2]
+            if lab2 == -1:
+                current_max += 1
+                data[sid]['cluster'] = current_max
+            else:
+                data[sid]['cluster'] = label_map_2[lab2]
+
+    return data, current_max
 
 
-def assign_clusters(remainder: Dict[str, dict], reps: Dict[str, dict], data: Dict[str, dict], threshold: float, window_scope: str, dist_cache: DistanceCache) -> Dict[str, dict]:
+def assign_clusters(
+    remainder: Dict[str, dict],
+    reps: Dict[str, dict],
+    data: Dict[str, dict],
+    threshold: float,
+    window_scope: str,
+    dist_cache: DistanceCache
+) -> Dict[str, dict]:
     """
     Assign remaining sequences to nearest cluster representative.
-
-    Args:
-        remainder: Unassigned sequences.
-        reps: Cluster representatives.
-        data: Existing clustered data.
-        threshold: Distance threshold.
-        window_scope: Distance cache scope.
-        dist_cache: DistanceCache object.
-
-    Returns:
-        Updated data dict with assigned clusters.
     """
+    if not remainder:
+        return data
+
+    mh_map: Dict[str, sourmash.MinHash] = {}
+    mh_map.update({k: v['mh'] for k, v in remainder.items()})
+    mh_map.update({k: v['mh'] for k, v in reps.items()})
+
     for k1, v1 in remainder.items():
         min_dist = 1.0
         assigned_cluster = None
         for k2, v2 in reps.items():
-            cached = dist_cache.get(window_scope, k1, k2)
-            if cached is None:
-                d = v1['mh'].containment_ani(v2['mh']).dist
-                dist_cache.set(window_scope, k1, k2, d)
-            else:
-                d = cached
+            d = _distance(k1, k2, scope=window_scope, mh_map=mh_map, cache=dist_cache)
             if d < threshold and d < min_dist:
                 min_dist = d
                 assigned_cluster = v2['cluster']
@@ -229,22 +248,20 @@ def assign_clusters(remainder: Dict[str, dict], reps: Dict[str, dict], data: Dic
     return data
 
 
-def cluster_seqs(data: Dict[str, dict], max_cluster: int, threshold: float, round_num: str, start: int, outdir: str, window: str, dist_cache: DistanceCache) -> Tuple[Dict[str, dict], Dict[str, dict], int]:
+def cluster_seqs(
+    data: Dict[str, dict],
+    max_cluster: int,
+    threshold: float,
+    round_num: str,
+    start: int,
+    outdir: str,
+    window: str,
+    dist_cache: DistanceCache,
+    min_samples_primary: int,
+    min_samples_secondary: int
+) -> Tuple[Dict[str, dict], Dict[str, dict], int]:
     """
     Perform clustering and assignment in multiple rounds if necessary.
-
-    Args:
-        data: Mapping of IDs to sequence metadata.
-        max_cluster: Max cluster size per round.
-        threshold: Distance threshold for DBSCAN.
-        round_num: Current round identifier.
-        start: Starting cluster index.
-        outdir: Output directory.
-        window: Window identifier.
-        dist_cache: DistanceCache object.
-
-    Returns:
-        Tuple of (clusters dict, loose/unassigned dict, last cluster number).
     """
     if start != 0:
         LOGGER.info(f'Round {round_num} - Continuing from cluster {start}')
@@ -252,14 +269,19 @@ def cluster_seqs(data: Dict[str, dict], max_cluster: int, threshold: float, roun
         main, rem = main_and_remainder(data, max_cluster, round_num)
         LOGGER.info(f'Round {round_num} - Clustering {len(main)} sequences')
         clusters, last_cluster = create_clusters(
-            main, threshold, start, f'main_{round_num}', outdir,
-            window_scope=f"win:{window}", dist_cache=dist_cache
+            main, threshold, start,
+            window_scope=f"win:{window}",
+            dist_cache=dist_cache,
+            min_samples_primary=min_samples_primary,
+            min_samples_secondary=min_samples_secondary
         )
         LOGGER.info(f'Round {round_num} - Clustered into {last_cluster - start} clusters')
         if rem:
             reps = select_reps(clusters)
             LOGGER.info(f'Round {round_num} - Assigning {len(rem)} sequences')
-            clusters = assign_clusters(rem, reps, clusters, threshold, f"win:{window}", dist_cache)
+            clusters = assign_clusters(
+                rem, reps, clusters, threshold, f"win:{window}", dist_cache
+            )
         loose = {k: rem[k] for k in rem if k not in clusters}
     else:
         loose, last_cluster = {}, start + 1
@@ -269,18 +291,14 @@ def cluster_seqs(data: Dict[str, dict], max_cluster: int, threshold: float, roun
     return clusters, loose, last_cluster
 
 
-def compute_centroids(seq_ids: List[str], full_mh_map: Dict[str, sourmash.MinHash], dist_cache: DistanceCache, seqs: Dict[str, str]) -> Tuple[Optional[str], str]:
+def compute_centroids(
+    seq_ids: List[str],
+    full_mh_map: Dict[str, sourmash.MinHash],
+    dist_cache: DistanceCache,
+    seqs: Dict[str, str]
+) -> Tuple[Optional[str], str]:
     """
     Compute centroid sequence ID for a cluster based on average distance.
-
-    Args:
-        seq_ids: List of sequence IDs in cluster.
-        full_mh_map: Mapping of IDs to MinHash objects.
-        dist_cache: DistanceCache object.
-        seqs: Mapping of IDs to sequences.
-
-    Returns:
-        Tuple of (centroid sequence ID or None, sequence string).
     """
     if not seq_ids:
         return None, ""
@@ -295,12 +313,7 @@ def compute_centroids(seq_ids: List[str], full_mh_map: Dict[str, sourmash.MinHas
         for oid in seq_ids:
             if sid == oid:
                 continue
-            cached = dist_cache.get("full", sid, oid)
-            if cached is None:
-                d = full_mh_map[sid].containment_ani(full_mh_map[oid]).dist
-                dist_cache.set("full", sid, oid, d)
-            else:
-                d = cached
+            d = _distance(sid, oid, scope="full", mh_map=full_mh_map, cache=dist_cache)
             dsum += d
             cnt += 1
         avg = dsum / cnt if cnt else 0.0
@@ -310,19 +323,41 @@ def compute_centroids(seq_ids: List[str], full_mh_map: Dict[str, sourmash.MinHas
     return cen, seqs.get(cen, "")
 
 
+def compute_cluster_min_max(
+    members: List[str],
+    full_mh_map: Dict[str, sourmash.MinHash],
+    dist_cache: DistanceCache
+) -> Tuple[float, float]:
+    """
+    Compute the minimum and maximum pairwise distances among cluster members
+    using the full-length MinHashes (scope 'full').
+
+    Returns (min_dist, max_dist). For singleton clusters, returns (0.0, 0.0).
+    """
+    if not members or len(members) == 1:
+        return 0.0, 0.0
+
+    min_d = float('inf')
+    max_d = 0.0
+    n = len(members)
+    for i in range(n):
+        a = members[i]
+        for j in range(i + 1, n):
+            b = members[j]
+            d = _distance(a, b, scope="full", mh_map=full_mh_map, cache=dist_cache)
+            if d < min_d:
+                min_d = d
+            if d > max_d:
+                max_d = d
+
+    if min_d == float('inf'):
+        min_d = 0.0
+    return float(min_d), float(max_d)
+
+
 def save_output(json_data: List[dict], seq_data: Dict[str, str], taxon: str, segment: str, outdir: str) -> None:
     """
     Save clustering results and sequences to disk.
-
-    Args:
-        json_data: List of cluster result dicts.
-        seq_data: Mapping of IDs to sequences.
-        taxon: Taxon name.
-        segment: Segment name.
-        outdir: Output directory.
-
-    Returns:
-        None
     """
     safe_taxon = sanitize_filename(taxon)
     safe_segment = sanitize_filename(segment)
@@ -346,7 +381,82 @@ def save_output(json_data: List[dict], seq_data: Dict[str, str], taxon: str, seg
             out = '\n'.join([f'>{id_}\n{seq_data[id_]}' for id_ in ids]) + '\n'
         with gzip.open(fname, 'wt', encoding='utf-8') as f:
             f.write(out)
-        LOGGER.info(f"Saved cluster sequence(s) to {fname}")
+    LOGGER.info("Saved cluster sequence(s)")
+
+
+# -------------------------------
+#  TROUBLESHOOTING
+# -------------------------------
+
+def _compute_full_distance_matrix_for_members(
+    members: List[str],
+    full_mh_map: Dict[str, sourmash.MinHash],
+    dist_cache: DistanceCache
+) -> Tuple[np.ndarray, List[str]]:
+    """
+    Build a pairwise distance matrix for the given members using the 'full' sketches.
+    Returns (matrix, ids) where ids is the row/col order.
+    """
+    ids = sorted(members)
+    n = len(ids)
+    mat = np.zeros((n, n), dtype=float)
+    for i in range(n):
+        ai = ids[i]
+        for j in range(i + 1, n):
+            aj = ids[j]
+            d = _distance(ai, aj, scope="full", mh_map=full_mh_map, cache=dist_cache)
+            mat[i, j] = mat[j, i] = float(d)
+    np.fill_diagonal(mat, 0.0)
+    return mat, ids
+
+
+def _save_distance_matrix_tsv_gz(
+    ids: List[str],
+    mat: np.ndarray,
+    out_path: Path
+) -> None:
+    """
+    Save a distance matrix as gzipped TSV with header:
+      first row:  ID <tab> id1 <tab> id2 ...
+      rows:       idX <tab> d11 <tab> d12 ...
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(out_path, "wt", encoding="utf-8") as f:
+        f.write("ID\t" + "\t".join(ids) + "\n")
+        for i, row_id in enumerate(ids):
+            row_vals = [f"{mat[i, j]:.6f}" for j in range(len(ids))]
+            f.write(row_id + "\t" + "\t".join(row_vals) + "\n")
+
+
+def maybe_emit_cluster_distance_matrix(
+    *,
+    taxon: str,
+    segment: str,
+    cluster_id: int,
+    members: List[str],
+    threshold: float,
+    full_mh_map: Dict[str, sourmash.MinHash],
+    dist_cache: DistanceCache,
+    outdir: str
+) -> Optional[Path]:
+    """
+    If the max intra-cluster distance of 'members' exceeds 'threshold',
+    compute and save a gzipped TSV distance matrix. Returns output path or None.
+    """
+    if len(members) <= 1:
+        return None
+
+    _, max_d = compute_cluster_min_max(members, full_mh_map, dist_cache)
+    if max_d <= threshold:
+        return None
+
+    mat, ids = _compute_full_distance_matrix_for_members(members, full_mh_map, dist_cache)
+
+    safe_taxon = sanitize_filename(taxon)
+    safe_segment = sanitize_filename(segment)
+    out_path = Path(outdir) / f"{safe_taxon}-{safe_segment}-cluster{cluster_id}.dists.tsv.gz"
+    _save_distance_matrix_tsv_gz(ids, mat, out_path)
+    return out_path
 
 
 # -------------------------------
@@ -356,10 +466,6 @@ def save_output(json_data: List[dict], seq_data: Dict[str, str], taxon: str, seg
 def main():
     """
     Command-line entry point for EPITOME sequence clustering.
-
-    Parses arguments, loads sequences, performs windowed MinHash-based
-    clustering with DBSCAN, optionally computes cluster centroids, and
-    writes output files.
     """
     version = "2.0"
 
@@ -368,10 +474,12 @@ def main():
     parser.add_argument("--taxon", default="null", help="Taxon name.")
     parser.add_argument("--segment", default="null", help="Segment name.")
     parser.add_argument("--dist", type=float, default=0.02, help="Distance threshold (1 - ANI/100).")
-    parser.add_argument("--scaled", type=int, default=1000, help="MinHash scaled factor.")
+    parser.add_argument("--scaled", type=int, default=100, help="MinHash scaled factor.")
     parser.add_argument("--ksize", type=int, default=31, help="MinHash k-mer size.")
     parser.add_argument("--window_size", type=int, default=8000, help="Window size for MinHash splitting.")
     parser.add_argument("--max_cluster", type=int, default=1000, help="Maximum number of sequences to cluster per round.")
+    parser.add_argument("--min_samples_primary", type=int, default=5, help="Minimum numbers of samples for to create a cluster on primary  DBSCAN stage.")
+    parser.add_argument("--min_samples_secondary", type=int, default=1, help="Minimum numbers of samples for to create a cluster on secondary DBSCAN stage (noise from primary stage).")
     parser.add_argument("--centroid", action="store_true", help="Calculate the centroid for each cluster. Centroid sequences are returned in the 'sequence' field.")
     parser.add_argument("--outdir", default='.', help="Output directory.")
     parser.add_argument("--seed", type=int, default=11, help="Random seed.")
@@ -381,6 +489,8 @@ def main():
     LOGGER.info(f"{os.path.basename(__file__).replace('.py', '')} v{version}")
     LOGGER.info(f"Author: Jared Johnson")
 
+    LOGGER.info(vars(args))
+
     random.seed(args.seed)
     Path(args.outdir).mkdir(parents=True, exist_ok=True)
 
@@ -389,13 +499,14 @@ def main():
     dist_cache = DistanceCache()
     full_mh_map = build_full_minhash_map(seqs, args.ksize, args.scaled)
 
-    results = defaultdict(list)
+    results: Dict[str, List[str]] = defaultdict(list)
     for window, data in windows.items():
         start, round_num, win_res = 0, 1, {}
         while data:
             clusters, data, start = cluster_seqs(
                 data, args.max_cluster, args.dist, f'{round_num}_{window}',
-                start, args.outdir, window, dist_cache
+                start, args.outdir, window, dist_cache,
+                args.min_samples_primary, args.min_samples_secondary
             )
             win_res.update(clusters)
             round_num += 1
@@ -403,7 +514,7 @@ def main():
             results[sample].append(str(info['cluster']))
 
     unique, new_id = {}, 1
-    cluster_map = {}
+    cluster_map: Dict[int, List[str]] = {}
     for key, cluster_ids in results.items():
         value = ":".join(cluster_ids)
         if value not in unique:
@@ -412,15 +523,36 @@ def main():
         cid = unique[value]
         cluster_map.setdefault(cid, []).append(key)
 
-    cluster_list = []
-    for key, value in cluster_map.items():
+    cluster_list: List[dict] = []
+    for key, members in cluster_map.items():
+        # compute per-cluster min/max distances on full sketches
+        min_d, max_d = compute_cluster_min_max(members, full_mh_map, dist_cache)
         row = {
             'taxon': args.taxon,
             'segment': args.segment,
             'cluster': key,
-            'members': value
+            'members': members,
+            'dist_range': [min_d, max_d]
         }
         cluster_list.append(row)
+
+    max_dists = [c['dist_range'][1] for c in cluster_list]
+    avg_max_dist = sum(max_dists) / len(cluster_list) if cluster_list else 0.0
+    max_max_dist = max(max_dists) if cluster_list else 0.0
+    min_max_dist = min(max_dists) if cluster_list else 0.0
+
+    # Emit distance matrices for problematic clusters
+    for row in cluster_list:
+        maybe_emit_cluster_distance_matrix(
+            taxon=args.taxon,
+            segment=args.segment,
+            cluster_id=row["cluster"],
+            members=row.get("members", []),
+            threshold=args.dist,
+            full_mh_map=full_mh_map,
+            dist_cache=dist_cache,
+            outdir=args.outdir
+        )
 
     if args.centroid:
         for i, row in enumerate(cluster_list):
@@ -434,6 +566,7 @@ def main():
     # Summary
     LOGGER.info(f"Total input sequences: {len(seqs)}")
     LOGGER.info(f"Total clusters: {new_id - 1}")
+    LOGGER.info(f"Max. intra-cluster distance: Range = {min_max_dist} - {max_max_dist}; Avg. = {avg_max_dist}")
     LOGGER.info(f"Results saved to {args.outdir}")
 
 
