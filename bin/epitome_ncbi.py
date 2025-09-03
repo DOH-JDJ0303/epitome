@@ -293,8 +293,6 @@ def main() -> None:
         for grp in groups:
             token_list = [_format_segment_name(t) for t in grp.split("|") if t.strip()]
             token_set = set(token_list)
-            if len(token_set) < 2:
-                continue
             canonical = token_list[0]
             for t in token_set:
                 seg_syn_map[t] = canonical
@@ -304,6 +302,7 @@ def main() -> None:
 
     rows: list[dict] = []
     missing_accession = 0
+    missing_seg_syns = set()
     for i, rec in enumerate(ds_genome_list, 1):
         accession = rec.get("accession")
         if not accession:
@@ -319,7 +318,7 @@ def main() -> None:
                 continue
             segment = _format_segment_name(segment)
             if segment not in seg_syn_map:
-                LOGGER.warning(f"Segment {segment} not in synonyms")
+                missing_seg_syns.add(segment)
             segment = seg_syn_map.get(segment)
         else:
             segment = "wg"
@@ -348,6 +347,9 @@ def main() -> None:
 
         if i % 1000 == 0:
             LOGGER.debug("Processed %d genome records...", i)
+    
+    if missing_seg_syns:
+        LOGGER.warning(f"The following segment names do not match provided synonyms: {missing_seg_syns}")
 
     if missing_accession:
         LOGGER.warning("Skipped %d records without accession", missing_accession)
