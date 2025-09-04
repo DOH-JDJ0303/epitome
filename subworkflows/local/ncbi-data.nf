@@ -19,7 +19,7 @@ workflow NCBI_DATA_SUBWF {
     // MODULE: Gather NCBI data for taxon
     NCBI_DATA(
         ch_input
-            .map{ [ it.taxon, it.segmentSynomyms, it.segmented ] }
+            .map{ [ it.taxon, it.segmentSynonyms, it.segmented ] }
             .groupTuple(by: 0)
             .map{ taxon, segmentSynonyms, segmented -> [ taxon, segmentSynonyms.first(), segmented.first()  ] }
     )
