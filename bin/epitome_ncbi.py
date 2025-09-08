@@ -55,7 +55,7 @@ def _format_segment_name(seg: Optional[str]) -> Optional[str]:
     if seg is None:
         return seg
     seg = seg.replace(r'\;', ';').strip()
-    seg = re.sub(r'\s+', ' ', seg)
+    seg = re.sub(r'\s+', '', seg)
     seg = seg.lower()
     return seg
 
