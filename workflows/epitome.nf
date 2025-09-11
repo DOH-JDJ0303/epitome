@@ -70,17 +70,13 @@ workflow EPITOME {
         .fromPath(params.input)
         .splitCsv(header:true, quote: '"')
         .map{ [ taxon:    it.taxon, 
-                segment:  it.containsKey('segment') ? ( it.segment ? it.segment : 'wg') : 'wg',
                 assembly: it.containsKey('assembly') ? ( it.assembly ? file(it.assembly, checkIfExists: true) : [] ) : [], 
                 metadata: it.containsKey('metadata') ? ( it.metadata ? file(it.metadata, checkIfExists: true) : [] ) : [],
-                segmentSynonyms: it.containsKey('segmentSynonyms') ? ( it.segmentSynonyms ? it.segmentSynonyms : null ) : null,
-                segmented: it.containsKey('segmented') ? ( it.segmented ? it.segmented : 'FALSE' ) : 'FALSE',
+                segmented: it.containsKey('segmented') ? it.segmented.toLowerCase() == 'true' : false,
                 exclusions: it.containsKey('exclusions') ? ( it.exclusions ? file(it.exclusions, checkIfExists: true) : [] ) : [],
-                ]
-                }
-        .set{ ch_input_full }
-
-        ch_input_full.map{ [ taxon: it.taxon, segment: it.segment, assembly: it.assembly, metadata: it.metadata ] }.set{ ch_input_part }
+            ]
+        }
+        .set{ ch_input }
 
     /*
     =============================================================================================================================
@@ -90,17 +86,30 @@ workflow EPITOME {
     if(params.ncbi){
 
         NCBI_DATA_SUBWF(
-            ch_input_full
+            ch_input
         )
         ch_versions = ch_versions.mix(NCBI_DATA_SUBWF.out.versions)
         
-        NCBI_DATA_SUBWF
-            .out
-            .input
-            .concat(ch_input_part.filter{ it.segment && it.assembly })
-            .map{ [ it.taxon, it.segment, it.assembly, it.metadata ] }
-            .groupTuple(by: [0,1])
-            .set{ch_input_part}
+    ch_input
+        .concat( NCBI_DATA_SUBWF.out.input )
+        .map{ [it.taxon, it]}
+        .groupTuple( )
+        .map { String taxon, List<Map> recs ->
+            // accumulate unique values per key using insertion-ordered sets
+            def acc = [:].withDefault { new LinkedHashSet() }
+            recs.each { rec ->
+                rec.each { k, v -> if (v != null) acc[k] << v }
+            }
+
+            // collapse singletons to the lone value; keep >1 as List
+            def collapsed = acc.collectEntries { k, set ->
+                def vals = set as List
+                [(k): (vals.size() == 1 ? vals[0] : vals.findAll{it})]
+            }
+
+            // keep the grouping key explicitly (optional)
+            [ taxon: taxon ] + collapsed
+        }.set{ ch_input }
     }
 
     /*
@@ -110,16 +119,39 @@ workflow EPITOME {
     */
     // Reformat and merge inputs (from NCBI and the user)
     MERGE_INPUTS (
-        ch_input_part
+        ch_input.map{ [ it.taxon, it.assembly, it.metadata, it.segmented ] }
     )
     ch_versions = ch_versions.mix(MERGE_INPUTS.out.versions.first())
     MERGE_INPUTS
         .out
-        .merged
-        .join( ch_input_full.map{ [ it.taxon, it.segment, it.exclusions ] }, by: [0,1], remainder: true)
-        .filter{ it[2] }
-        .map{ taxon, segment, assembly, metadata, exclusions -> [ taxon: taxon, segment: segment, assembly: assembly, metadata: metadata, exclusions: exclusions ? exclusions : [] ] }
+        .man
+        .splitCsv(header: true)
+        .set{ch_input_man}
+    
+    MERGE_INPUTS
+        .out
+        .fa
+        .transpose()
+        .map{ taxon, f -> [taxon, file(f).getName(), f] }
+        .join(ch_input_man.map{ taxon, data -> [taxon, data.assembly, data.segment] }, by: [0,1])
+        .map{ taxon, f_name, f, segment -> [taxon, segment, f] }
+        .set{ch_input_fa}
+
+    MERGE_INPUTS
+        .out
+        .meta
+        .transpose()
+        .map{ taxon, f -> [taxon, file(f).getName(), f] }
+        .join(ch_input_man.map{ taxon, data -> [taxon, data.metadata, data.segment] }, by: [0,1])
+        .map{ taxon, f_name, f, segment -> [taxon, segment, f] }
+        .set{ch_input_meta}
+
+    ch_input_fa
+        .join(ch_input_meta, by: [0,1])
+        .combine(ch_input.map{[it.taxon, it.exclusions]}, by: 0)
+        .map{ taxon, segment, assembly, metadata, exclusions -> [taxon: taxon, segment: segment, assembly: assembly, metadata: metadata, exclusions: exclusions] }
         .set{ ch_input }
+
 
     /*
     =============================================================================================================================

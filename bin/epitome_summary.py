@@ -11,6 +11,7 @@ import logging
 import statistics
 from collections import defaultdict
 from typing import Any, Dict, Iterable, List, Mapping
+from datetime import datetime
 
 from epitome_utils import sanitize_filename, load_jsonl_gz_by_key, logging_config
 
@@ -19,6 +20,8 @@ from epitome_utils import sanitize_filename, load_jsonl_gz_by_key, logging_confi
 # -------------------------------
 
 LOGGER = logging_config()
+now = datetime.now()
+timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 
 # -------------------------------
 #  FUNCTIONS
@@ -103,7 +106,7 @@ def save_output(
     with gzip.open(filename, 'wt', encoding='utf-8') as f:
         for row in json_data:
             if isinstance(row, dict):
-                json.dump(row, f, sort_keys=True)
+                json.dump(row, f)
                 f.write('\n')
     LOGGER.info(f"Saved summary to {filename}")
 
@@ -170,7 +173,10 @@ def main() -> None:
         metadata_summary['accessions'] = unique_accessions
 
         summary_row = {
-            "name": f"{args.taxon}-{args.segment}-{cid}",
+            "taxon": args.taxon,
+            "segment": args.segment,
+            "variant": cid,
+            "timestamp": timestamp,
             "sequence": seq_string,
             "method": args.method,
             "metadata": metadata_summary

@@ -26,7 +26,7 @@ LOGGER = logging_config()
 
 def load_fasta_map(path: str) -> dict[str, str]:
     """Load FASTA(.gz ok via screed) and map both full and base accessions to sequences."""
-    LOGGER.info(f"Loading FASTA sequences: %s", path)
+    LOGGER.info("Loading FASTA sequences: %s", path)
     seq_by_acc: dict[str, str] = {}
     count = 0
     for rec in screed.open(path):
@@ -41,24 +41,25 @@ def load_fasta_map(path: str) -> dict[str, str]:
         count += 1
         if count % 10000 == 0:
             LOGGER.debug("Processed %d FASTA records...", count)
-    LOGGER.info("Loaded %d sequences into FASTA map (keys include full and base accessions)", len(seq_by_acc))
+    LOGGER.info(f"Loaded {len(seq_by_acc)} sequences into FASTA map (keys include full and base accessions)"
+    )
     return seq_by_acc
 
 
 SUBTYPE_TARGETS = {
-    "subtype", "serotype", "genotype", "serogroup", "variety",
-    "biotype", "lineage", "clade", "subclade", "pathotype", "group", "subgroup"
+    "subtype",
+    "serotype",
+    "genotype",
+    "serogroup",
+    "variety",
+    "biotype",
+    "lineage",
+    "clade",
+    "subclade",
+    "pathotype",
+    "group",
+    "subgroup",
 }
-
-def _format_segment_name(seg: Optional[str]) -> Optional[str]:
-    """Normalize a raw segment name string."""
-    if seg is None:
-        return seg
-    seg = seg.replace(r'\;', ';').strip()
-    seg = re.sub(r'\s+', '', seg)
-    seg = seg.lower()
-    return seg
-
 
 def parse_edirect_json_docsum(edirect_json_obj: Iterable[Mapping]) -> dict[str, dict[str, str]]:
     """Extract subtype-like attributes from EDirect esummary/efetch docsum JSON."""
@@ -94,7 +95,7 @@ def parse_edirect_json_docsum(edirect_json_obj: Iterable[Mapping]) -> dict[str, 
                         m[k_norm] = v
             if m:
                 data[accession] = m
-    LOGGER.info("Extracted subtype data for %d accessions (from %d rows)", len(data), rows)
+    LOGGER.info(f"Extracted subtype data for {len(data)} accessions (from {rows} rows)")
     return data
 
 
@@ -128,10 +129,8 @@ def extract_taxids(ds_taxa_json: list[dict]) -> dict[str, str]:
     return out
 
 
-
 def lineage_to_species_and_taxid(
-    lineage_list: Optional[list],
-    taxid_name_map: dict[object, str]
+    lineage_list: Optional[list], taxid_name_map: dict[object, str]
 ) -> tuple[Optional[str], Optional[object]]:
     """Map a lineage list to (species_name, taxid) using a taxid->name map."""
     if not isinstance(lineage_list, list):
@@ -146,76 +145,44 @@ def lineage_to_species_and_taxid(
     return None, None
 
 
-def write_segment_files(
+def write_taxon_files(
     taxon: str,
-    seg: str,
-    seg_rows: Sequence[dict],
+    rows: Sequence[dict],
     fasta_map: dict[str, str],
-    out_dir: Path
-) -> list[str]:
-    """Write per-segment JSON and FASTA files."""
-    LOGGER.info("Writing files for segment '%s' (n=%d)", seg, len(seg_rows))
-    file_prefix = f"{taxon}-{seg}"
-    json_path = out_dir / f"{file_prefix}.json"
-    fasta_path = out_dir / f"{file_prefix}.fa.gz"
+    out_dir: Path,
+) -> None:
+    """Write a single JSON and FASTA for the taxon, preserving raw segment info."""
+    LOGGER.info("Writing consolidated outputs for taxon '%s' (n=%d)", taxon, len(rows))
+    json_path = out_dir / f"{taxon}.json"
+    fasta_path = out_dir / f"{taxon}.fa.gz"
 
     # JSON
     import json
     with json_path.open("w", encoding="utf-8") as f:
-        json.dump(seg_rows, f, ensure_ascii=False, indent=2)
+        json.dump(rows, f, ensure_ascii=False, indent=2)
     LOGGER.debug("Wrote JSON: %s", json_path)
 
-    # FASTA
+    # FASTA (dedupe on accession)
     import gzip
     n_fasta = 0
     seen: set[str] = set()
     with gzip.open(f"{fasta_path}", "wt", encoding="utf-8") as f:
-        for r in seg_rows:
+        for r in rows:
             acc = r.get("accession")
             if not acc:
-                LOGGER.debug("Skipping row without accession in segment %s", seg)
+                continue
+            if acc in seen:
                 continue
             seq = fasta_map.get(acc) or fasta_map.get(acc.split(".", 1)[0])
             if not seq:
                 LOGGER.warning("No sequence found for accession %s in FASTA map", acc)
                 continue
-            if acc in seen:
-                LOGGER.debug("Duplicate accession in segment %s: %s (skipping)", seg, acc)
-                continue
             seen.add(acc)
             f.write(f">{acc}\n")
             for i in range(0, len(seq), 60):
-                f.write(seq[i:i+60] + "\n")
+                f.write(seq[i : i + 60] + "\n")
             n_fasta += 1
     LOGGER.info("Wrote FASTA: %s (records=%d)", fasta_path, n_fasta)
-
-    return [taxon, seg, file_prefix]
-
-
-def split_by_segment(
-    taxon: str,
-    rows: list[dict],
-    fasta_map: dict[str, str],
-    out_dir: Path
-) -> None:
-    """Split rows by segment, write per-segment JSON/FASTA, and a manifest CSV."""
-    LOGGER.info("Splitting %d sequences into segments", len(rows))
-    by_seg: dict[str, list[dict]] = {}
-    for r in rows:
-        seg = r.get("segment") or "wg"
-        by_seg.setdefault(seg, []).append(r)
-
-    man: list[list[str]] = [["taxon", "segment", "prefix"]]
-    for seg, seg_rows in by_seg.items():
-        man_row = write_segment_files(taxon, seg, seg_rows, fasta_map, out_dir)
-        man.append(man_row)
-
-    man_path = out_dir / f"{taxon}.manifest.csv"
-    with man_path.open("w", newline="", encoding="utf-8") as f:
-        out = '\n'.join([','.join(row) for row in man])
-        f.write(out)
-
-    LOGGER.info("Manifest written: %s (segments=%d)", man_path, len(by_seg))
 
 
 # -------------------------------
@@ -223,86 +190,63 @@ def split_by_segment(
 # -------------------------------
 
 def main() -> None:
-    version = "2.0"
+    version = "2.1"
 
-    """CLI entry point: merge NCBI datasets & EDirect docsum; write per-segment outputs."""
+    """CLI entry point: merge NCBI datasets & EDirect docsum; write single taxon outputs."""
     parser = argparse.ArgumentParser(
-        description="Merge NCBI datasets & EDirect subtype data, then write segment-specific outputs."
+        description="Merge NCBI datasets & EDirect subtype data, then write a single JSON/FASTA for the taxon."
     )
     parser.add_argument("--taxon", required=True, help="Taxon name.")
-    parser.add_argument("--datasets_genome_fasta", required=True,
-                        help="Path to genomic.fna from 'datasets download virus genome taxon'.")
-    parser.add_argument("--datasets_genome_json", required=True,
-                        help="Path to 'data_report.jsonl' from 'datasets download virus genome taxon'.")
-    parser.add_argument("--datasets_taxonomy_json", required=True,
-                        help="Path to JSON from 'datasets summary taxonomy taxon'.")
-    parser.add_argument("--edirect_json", required=True,
-                        help="Path to JSON or JSONL from EDirect esummary/efetch docsum.")
-    parser.add_argument("--segmented", action="store_true",
-                        help="Set if the virus is segmented (segment names used when present).")
-    parser.add_argument("--segment_synonyms", default=None,
-                        help="Optional semicolon list of segment synonyms 's|small;m|medium|middle;l|large'.")
+    parser.add_argument("--datasets_genome_fasta", required=True, help="Path to genomic.fna from 'datasets download virus genome taxon'.")
+    parser.add_argument("--datasets_genome_json", required=True, help="Path to 'data_report.jsonl' from 'datasets download virus genome taxon'.")
+    parser.add_argument("--datasets_taxonomy_json", required=True, help="Path to JSON from 'datasets summary taxonomy taxon'.")
+    parser.add_argument("--edirect_json", required=True, help="Path to JSON or JSONL from EDirect esummary/efetch docsum.")
     parser.add_argument("--out_dir", default=".", help="Output directory.")
     parser.add_argument("--version", action="version", version=version, help="Show script version and exit.")
     args = parser.parse_args()
 
     LOGGER.info(f"{os.path.basename(__file__).replace('.py', '')} v{version}")
-    LOGGER.info(f"Author: Jared Johnson")
+    LOGGER.info("Author: Jared Johnson")
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    LOGGER.debug("Output directory ensured: %s", out_dir)
+    LOGGER.debug(f"Output directory ensured: {out_dir}")
 
     try:
         fasta_map = load_fasta_map(args.datasets_genome_fasta)
     except Exception as e:
-        LOGGER.exception("Failed to load FASTA: %s", e)
+        LOGGER.exception(f"Failed to load FASTA: {e}")
         sys.exit(2)
 
     try:
         ds_genome_list = load_json_or_jsonl(args.datasets_genome_json)
-        LOGGER.info("Loaded genome report (%s)", args.datasets_genome_json)
+        LOGGER.info(f"Loaded genome report ({args.datasets_genome_json})")
     except Exception as e:
-        LOGGER.exception("Failed to load genome JSON/JSONL: %s", e)
+        LOGGER.exception(f"Failed to load genome JSON/JSONL: {e}")
         sys.exit(2)
 
     try:
         ds_taxa_json = load_json_or_jsonl(args.datasets_taxonomy_json)
-        LOGGER.info("Loaded taxonomy summary (%s)", args.datasets_taxonomy_json)
+        LOGGER.info(f"Loaded taxonomy summary ({args.datasets_taxonomy_json})")
     except Exception as e:
-        LOGGER.exception("Failed to load taxonomy JSON/JSONL: %s", e)
+        LOGGER.exception(f"Failed to load taxonomy JSON/JSONL: {e}")
         sys.exit(2)
 
     try:
         edirect_json_obj = load_json_or_jsonl(args.edirect_json)
-        LOGGER.info("Loaded EDirect docsum (%s)", args.edirect_json)
+        LOGGER.info(f"Loaded EDirect docsum ({args.edirect_json})")
     except Exception as e:
-        LOGGER.exception("Failed to load EDirect JSON/JSONL: %s", e)
+        LOGGER.exception(f"Failed to load EDirect JSON/JSONL: {e}")
         sys.exit(2)
 
     taxid_name_map = extract_taxids(ds_taxa_json)
-    LOGGER.debug("taxid->species entries: %d", len(taxid_name_map))
+    LOGGER.debug(f"taxid->species entries: {len(taxid_name_map)}")
 
     subtypes_map = parse_edirect_json_docsum(edirect_json_obj)
-    LOGGER.debug("subtype entries: %d", len(subtypes_map))
-
-    seg_syn_map: dict[str, str] = {}
-    if args.segment_synonyms:
-        LOGGER.info("Processing segment synonyms: %s", args.segment_synonyms)
-        groups = re.split(r'(?<!\\);', args.segment_synonyms)
-        for grp in groups:
-            token_list = [_format_segment_name(t) for t in grp.split("|") if t.strip()]
-            token_set = set(token_list)
-            canonical = token_list[0]
-            for t in token_set:
-                seg_syn_map[t] = canonical
-        LOGGER.debug("Segment synonym map size: %d; sample: %s",
-                    len(seg_syn_map),
-                    dict(list(seg_syn_map.items())[:10]))
+    LOGGER.debug(f"subtype entries: {len(subtypes_map)}")
 
     rows: list[dict] = []
     missing_accession = 0
-    missing_seg_syns = set()
     for i, rec in enumerate(ds_genome_list, 1):
         accession = rec.get("accession")
         if not accession:
@@ -311,17 +255,10 @@ def main() -> None:
                 LOGGER.warning(f"Record #{i} missing 'accession'; skipping")
             continue
 
+        # Preserve raw segment value exactly; if absent, None.
         segment = rec.get("segment")
-        if args.segmented:
-            if not segment:
-                LOGGER.warning(f"Record #{i} missing 'segment'; skipping")
-                continue
-            segment = _format_segment_name(segment)
-            if segment not in seg_syn_map:
-                missing_seg_syns.add(segment)
-            segment = seg_syn_map.get(segment)
-        else:
-            segment = "wg"
+        if segment is None:
+            segment = None  # explicit for clarity
 
         virus_lineage = (rec.get("virus") or {}).get("lineage") or []
         species_name, species_taxid = lineage_to_species_and_taxid(virus_lineage, taxid_name_map)
@@ -334,7 +271,7 @@ def main() -> None:
         base = {
             "accession": accession,
             "taxon": args.taxon,
-            "segment": segment,
+            "segment": segment,  # raw or None
             "species": species_name,
             "taxId": species_taxid,
             "host": host,
@@ -346,20 +283,21 @@ def main() -> None:
         rows.append({**base, **sub})
 
         if i % 1000 == 0:
-            LOGGER.debug("Processed %d genome records...", i)
-    
-    if missing_seg_syns:
-        LOGGER.warning(f"The following segment names do not match provided synonyms: {missing_seg_syns}")
+            LOGGER.debug(f"Processed {i} genome records...")
 
     if missing_accession:
-        LOGGER.warning("Skipped %d records without accession", missing_accession)
+        LOGGER.warning(f"Skipped {missing_accession} records without accession")
 
-    unique_segments = sorted({r["segment"] for r in rows if "segment" in r and r["segment"]})
-    LOGGER.info("Observed %d unique segment names: %s", len(unique_segments), ", ".join(unique_segments))
+    # Simple visibility on what we saw, without transforming names
+    unique_segments = sorted({str(r.get("segment")) for r in rows})
+    LOGGER.info(f"Observed {len(unique_segments)} unique segment values: {unique_segments}", )
 
-    split_by_segment(args.taxon, rows, fasta_map, out_dir)
+    # Single consolidated outputs by taxon
+    write_taxon_files(args.taxon, rows, fasta_map, out_dir)
 
-    LOGGER.info("Processing complete for taxon '%s' (rows=%d, outdir=%s)", args.taxon, len(rows), out_dir)
+    LOGGER.info(
+        f"Processing complete for taxon '{args.taxon}' (rows={len(rows)}, outdir={out_dir})"
+    )
 
 
 if __name__ == "__main__":

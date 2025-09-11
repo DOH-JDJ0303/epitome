@@ -3,16 +3,15 @@ process NCBI_DATA {
     label 'process_low'
 
     input:
-    tuple val(taxon), val(segment_synonyms), val(seg_status)
+    tuple val(taxon)
 
     output:
-    tuple val(taxon), path("*.fa.gz"), emit: fa
-    tuple val(taxon), path("*.json"),  emit: json
-    tuple val(taxon), path("*.csv"),   emit: man
-    path "versions.yml",               emit: versions
+    tuple val(taxon), path("*.fa.gz"), path("*.json"), emit: data
+    path "versions.yml",                               emit: versions
 
     when:
     task.ext.when == null || task.ext.when
+    
 
     script:
     args   = task.ext.args ?: ''
@@ -56,8 +55,6 @@ process NCBI_DATA {
     #---- COMBINE ----#
     ${tool} \\
         --taxon ${taxon.replace(' ', '_')} \\
-        --segment_synonyms "${segment_synonyms}" \\
-        ${seg_status == 'TRUE' ? '--segmented' : ''} \\
         --datasets_genome_fasta data/datasets-genome.fa \\
         --datasets_genome_json data/datasets-genome.jsonl \\
         --datasets_taxonomy data/datasets-taxonomy.json \\
