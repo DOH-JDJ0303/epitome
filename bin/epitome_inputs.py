@@ -76,7 +76,7 @@ def _update_missing(rec: Dict[str, Any]) -> None:
 def merge_records(metadata, fasta):
     LOGGER.info("Merging metadata with FASTA sequences")
     merged = []
-    required_keys = ["accession", "taxon"]
+    required_keys = ["accession"]
     accs = set()
 
     for src_path, recs in metadata:
