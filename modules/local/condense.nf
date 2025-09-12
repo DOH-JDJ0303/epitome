@@ -19,8 +19,8 @@ process CONDENSE {
     tool = "epitome_condense.py"
     """
     ${tool} \\
-        --taxon ${taxon} \\
-        --segment ${segment} \\
+        --taxon "${taxon}" \\
+        --segment "${segment}" \\
         --clusters ${clusters} \\
         --dist ${params.dist_threshold} \\
         --window_size ${params.window_size} \\

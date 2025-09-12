@@ -248,17 +248,22 @@ def main() -> None:
     os.makedirs(args.outdir, exist_ok=True)
     random.seed(args.seed)
 
+    norm_taxon = args.taxon.replace(' ', '_')
+    norm_segment = args.segment.replace(' ', '_')
+    expected_prefix = f"{norm_taxon}-{norm_segment}-"
+
     data: Dict[str, dict] = {}
     window_size = args.window_size
     for fasta in args.fasta:
         for rec in screed.open(fasta):
             sid, seq = rec.name, rec.sequence
 
-            sid_parts = sid.split('-')
-            if len(sid_parts) != 3:
-                raise ValueError(f"{sid} is malformed! Must be <taxon>-<segment>-<cluster>.")
-            else:
-                cid = sid_parts[2]
+            if not sid.startswith(expected_prefix):
+                raise ValueError(
+                    f"{sid} is malformed for provided taxon/segment. "
+                    f"Expected it to start with '{expected_prefix}'"
+                )
+            cid = sid[len(expected_prefix):].strip()
             data[str(cid)] = {
                 "sequence": seq,
                 "seqLen": len(seq)
