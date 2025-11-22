@@ -65,13 +65,13 @@ gitGraph:
 # Quick Start
 ## Step 1. Create your samplesheet
 > [!NOTE]
-> The example below creates a reference set for each taxon using data automatically downloaded from NCBI. It is also possible to supply your own sequence data with or without the NCBI data - learn more [here](https://github.com/DOH-JDJ0303/epitome/wiki).
+> The example below creates a reference set for each taxon using data automatically downloaded from NCBI. It is also possible to supply your own sequence data with or without the NCBI data - learn more [here](https://doh-jdj0303.github.io/epitome-docs/).
 
 `samplesheet.csv`:
 ```
-taxon,segmented,segmentSynonyms
-Hantavirus,TRUE,s|small;m|medium|middle;l|large
-Norovirus,FALSE,
+taxon,segmented
+Hantavirus,true
+Norovirus,false
 ```
 ## Step 2. Run EPITOME
 Run EPITOME using the command below.
