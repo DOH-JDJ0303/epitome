@@ -61,25 +61,40 @@ class DistanceCache:
 
 # ---------- JSON / CSV Readers ---------- #
 
+def _open_maybe_gzip(path: str, mode: str):
+    """Open normally or via gzip based on file suffix."""
+    if path.endswith(".gz"):
+        # Ensure binary/text mode compatibility for gzip
+        if "b" in mode:
+            return gzip.open(path, mode)
+        return gzip.open(path, mode.replace("t", ""))
+    return open(path, mode)
+
+
 def read_json(path: str) -> List[Dict[str, Any]]:
-    """Load a JSON file whose root is a list of objects."""
-    with open(path, "r", encoding="utf-8") as f:
+    """Load a JSON or JSON.gz file whose root is a list of objects."""
+    with _open_maybe_gzip(path, "rt") as f:
         obj = json.load(f)
+
     if not isinstance(obj, list):
         raise ValueError(f"{path}: JSON root must be a list of objects")
+
     for i, rec in enumerate(obj):
         if not isinstance(rec, dict):
             raise ValueError(f"{path}: element {i} is not an object")
+
     return obj
 
 
 def read_csv(path: str) -> List[Dict[str, Any]]:
-    """Load a CSV file into a list of dicts; trims strings and converts empty to None."""
+    """Load a CSV or CSV.gz into list of dicts; trims strings & converts empty to None."""
     recs: List[Dict[str, Any]] = []
-    with open(path, "r", encoding="utf-8", newline="") as f:
+
+    with _open_maybe_gzip(path, "rt") as f:
         reader = csv.DictReader(f)
         if reader.fieldnames is None:
             raise ValueError(f"{path}: missing CSV header row")
+
         for row in reader:
             clean: Dict[str, Any] = {}
             for k, v in row.items():
@@ -89,21 +104,41 @@ def read_csv(path: str) -> List[Dict[str, Any]]:
                     v = v if v != "" else None
                 clean[k] = v
             recs.append(clean)
+
     return recs
 
 
 def detect_and_read(path: str) -> Tuple[str, List[Dict[str, Any]]]:
-    """Read a file by extension (.json/.csv), with JSON→CSV fallback."""
-    ext = os.path.splitext(path)[1].lower()
+    """
+    Read JSON/CSV (optionally gzipped), with JSON→CSV fallback.
+    Extensions handled:
+      - .json, .json.gz
+      - .csv, .csv.gz
+    """
+    base, ext = os.path.splitext(path)
+    ext = ext.lower()
+
+    # Handle gz suffix: ext = ".gz" and base endswith .json/.csv
+    if ext == ".gz":
+        base2, ext2 = os.path.splitext(base)
+        ext2 = ext2.lower()
+        if ext2 == ".json":
+            return path, read_json(path)
+        if ext2 == ".csv":
+            return path, read_csv(path)
+        # Otherwise fallback below
+
+    # Normal non-gzip cases
     if ext == ".json":
         return path, read_json(path)
     if ext == ".csv":
         return path, read_csv(path)
+
+    # Fallback: try JSON then CSV
     try:
         return path, read_json(path)
     except Exception:
         return path, read_csv(path)
-
 
 # ---------- JSONL Helpers ---------- #
 
