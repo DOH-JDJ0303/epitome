@@ -64,10 +64,12 @@ class DistanceCache:
 def _open_maybe_gzip(path: str, mode: str):
     """Open normally or via gzip based on file suffix."""
     if path.endswith(".gz"):
-        # Ensure binary/text mode compatibility for gzip
-        if "b" in mode:
-            return gzip.open(path, mode)
-        return gzip.open(path, mode.replace("t", ""))
+        if "t" in mode:
+            return gzip.open(path, mode, encoding="utf-8")
+        return gzip.open(path, mode)
+    # Plain file
+    if "t" in mode:
+        return open(path, mode, encoding="utf-8", newline="")
     return open(path, mode)
 
 
