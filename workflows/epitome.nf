@@ -168,9 +168,6 @@ workflow EPITOME {
         .map{ taxon, segment, assembly, metadata, exclusions -> [taxon: taxon, segment: segment, assembly: assembly ? assembly : [], metadata: metadata ? metadata : [], exclusions: exclusions ? exclusions : []] }
         .set{ ch_input }
 
-    ch_input.view()
-
-
     /*
     =============================================================================================================================
         CREATE REFERENCES
