@@ -70,8 +70,8 @@ workflow EPITOME {
         .fromPath(params.input)
         .splitCsv(header:true, quote: '"')
         .map{ [ taxon:    it.taxon, 
-                assembly: it.containsKey('assembly') ? ( it.assembly ? file(it.assembly, checkIfExists: true) : [] ) : [], 
-                metadata: it.containsKey('metadata') ? ( it.metadata ? file(it.metadata, checkIfExists: true) : [] ) : [],
+                assembly: it.containsKey('assembly') ? ( it.assembly ? it.assembly.split(';').collect{f -> file(f, checkIfExists: true)} : [] ) : [], 
+                metadata: it.containsKey('metadata') ? ( it.metadata ? it.metadata.split(';').collect{f -> file(f, checkIfExists: true)} : [] ) : [],
                 segmented: it.containsKey('segmented') ? it.segmented.toLowerCase() == 'true' : false,
                 exclusions: it.containsKey('exclusions') ? ( it.exclusions ? file(it.exclusions, checkIfExists: true) : [] ) : [],
             ]

@@ -128,7 +128,7 @@ def normalize_keys(d: Mapping[str, Any]) -> Dict[str, Any]:
 # Main
 # ----------------------------
 def main():
-    version = "2.6"
+    version = "2.7"
 
     parser = argparse.ArgumentParser(description="Filter metadata/FASTA to matched records and emit CSV+FASTA (strict accession==header)")
     parser.add_argument("--metadata", nargs="+", required=True, help="Path(s) to metadata CSV/TSV file(s)")
@@ -142,6 +142,7 @@ def main():
                         help="Extract EPI_ISL_#### from FASTA headers and use it as the header key for matching/output.")
     parser.add_argument("--extract_epi_isl", dest="extract_epi_isl", action="store_true",
                         help=argparse.SUPPRESS)
+    parser.add_argument("--columns", nargs="+", help="Specific columns to include in output (if not specified, all columns are included)")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
 
@@ -154,6 +155,8 @@ def main():
         logger.info("FASTA headers will be normalized to EPI_ISL_####")
         if args.flu:
             logger.warning("Using --extract-epi-isl with --flu may prevent matches (flu metadata uses EPI##### segment accessions).")
+    if args.columns:
+        logger.info(f"Output limited to columns: {args.columns}")
 
     meta = read_metadata(args.metadata, logger)
     fa = read_fastas(args.fasta, logger, extract_epi_isl=args.extract_epi_isl)
@@ -223,6 +226,15 @@ def main():
     if matched_rows:
         # Union of keys; accession, segment, species first
         all_keys: Set[str] = set().union(*[set(r.keys()) for r in matched_rows])
+        
+        # Filter columns if specified
+        if args.columns:
+            requested_cols = {k.lower().replace(" ", "_") for k in args.columns}
+            all_keys = all_keys.intersection(requested_cols)
+            missing_cols = requested_cols - all_keys
+            if missing_cols:
+                logger.warning(f"Requested columns not found in data: {sorted(missing_cols)}")
+        
         ordered = []
         for k in ("accession", "segment", "species"):
             if k in all_keys:
