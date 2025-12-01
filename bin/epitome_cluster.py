@@ -530,7 +530,7 @@ def main():
         subset = random.sample(members, args.max_per_cluster) if len(members) > args.max_per_cluster else members
 
         # compute per-cluster min/max distances on full sketches
-        min_d, max_d = compute_cluster_min_max(members, full_mh_map, dist_cache)
+        min_d, max_d = compute_cluster_min_max(subset, full_mh_map, dist_cache)
         row = {
             'taxon': args.taxon,
             'segment': args.segment,
@@ -552,7 +552,7 @@ def main():
             taxon=args.taxon,
             segment=args.segment,
             cluster_id=row["cluster"],
-            members=row.get("members", []),
+            members=row.get("subset", []),
             threshold=args.dist,
             full_mh_map=full_mh_map,
             dist_cache=dist_cache,
