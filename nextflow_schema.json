@@ -1,5 +1,5 @@
 {
-    "$schema": "http://json-schema.org/draft-07/schema",
+    "$schema": "https://json-schema.org/draft-07/schema",
     "$id": "https://raw.githubusercontent.com/doh-jdj0303/epitome/master/nextflow_schema.json",
     "title": "doh-jdj0303/epitome pipeline parameters",
     "description": "Pipeline that makes reference genomes for each unique cluster of a species.",
@@ -87,11 +87,6 @@
                     "default": 0.02,
                     "description": "Target distance threshold (1-%ANI/100). It is often necessary to add approx. 0.03 to this value to reach the target."
                 },
-                "max_cluster": {
-                    "type": "integer",
-                    "default": 10000,
-                    "description": "Maximum number of sequences that will be included in the initial clustering step. Increasing this value may result in segmentation faults."
-                },
                 "ksize": {
                     "type": "integer",
                     "default": 31,
@@ -99,13 +94,23 @@
                 },
                 "scaled": {
                     "type": "integer",
-                    "default": 10,
+                    "default": 100,
                     "description": "Scaled option to use for Sourmash."
                 },
                 "window_size": {
                     "type": "integer",
                     "default": 8000,
                     "description": "Window size for MinHash splitting."
+                },
+                "max_per_round": {
+                    "type": "integer",
+                    "default": 1000,
+                    "description": "Maximum number of sequences to include per round of clustering."
+                },
+                "max_per_cluster": {
+                    "type": "integer",
+                    "default": 1000,
+                    "description": "Maximum number of sequences to include in the final clusters."
                 }
             }
         },
@@ -117,7 +122,7 @@
             "properties": {
                 "max_align": {
                     "type": "integer",
-                    "default": 10000,
+                    "default": 1000,
                     "description": "Maximum number of sequences that will be aligned per cluster."
                 },
                 "consensus": {
@@ -355,28 +360,28 @@
     },
     "allOf": [
         {
-            "$ref": "#/definitions/input_output_options"
+            "$ref": "#/$defs/input_output_options"
         },
         {
-            "$ref": "#/definitions/subworkflow_options"
+            "$ref": "#/$defs/subworkflow_options"
         },
         {
-            "$ref": "#/definitions/clustering_options"
+            "$ref": "#/$defs/clustering_options"
         },
         {
-            "$ref": "#/definitions/reference_options"
+            "$ref": "#/$defs/reference_options"
         },
         {
-            "$ref": "#/definitions/reference_genome_options"
+            "$ref": "#/$defs/reference_genome_options"
         },
         {
-            "$ref": "#/definitions/institutional_config_options"
+            "$ref": "#/$defs/institutional_config_options"
         },
         {
-            "$ref": "#/definitions/max_job_request_options"
+            "$ref": "#/$defs/max_job_request_options"
         },
         {
-            "$ref": "#/definitions/generic_options"
+            "$ref": "#/$defs/generic_options"
         }
     ]
 }

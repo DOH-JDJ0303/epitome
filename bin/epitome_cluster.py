@@ -250,7 +250,7 @@ def assign_clusters(
 
 def cluster_seqs(
     data: Dict[str, dict],
-    max_cluster: int,
+    max_per_round: int,
     threshold: float,
     round_num: str,
     start: int,
@@ -266,7 +266,7 @@ def cluster_seqs(
     if start != 0:
         LOGGER.info(f'Round {round_num} - Continuing from cluster {start}')
     if len(data) > 1:
-        main, rem = main_and_remainder(data, max_cluster, round_num)
+        main, rem = main_and_remainder(data, max_per_round, round_num)
         LOGGER.info(f'Round {round_num} - Clustering {len(main)} sequences')
         clusters, last_cluster = create_clusters(
             main, threshold, start,
@@ -371,7 +371,7 @@ def save_output(json_data: List[dict], seq_data: Dict[str, str], taxon: str, seg
     LOGGER.info(f"Saved cluster metrics to {filename}")
 
     for row in json_data:
-        ids = row.get("members", [])
+        ids = row.get("subset", [])
         cluster = row.get('cluster')
         var = 'multi' if len(ids) > 1 else 'single'
         fname = prefix.with_name(f"{prefix.name}-{cluster}.{var}.fa.gz")
@@ -428,7 +428,7 @@ def _save_distance_matrix_tsv_gz(
             f.write(row_id + "\t" + "\t".join(row_vals) + "\n")
 
 
-def maybe_emit_cluster_distance_matrix(
+def export_problematic_clusters(
     *,
     taxon: str,
     segment: str,
@@ -477,8 +477,9 @@ def main():
     parser.add_argument("--scaled", type=int, default=100, help="MinHash scaled factor.")
     parser.add_argument("--ksize", type=int, default=31, help="MinHash k-mer size.")
     parser.add_argument("--window_size", type=int, default=8000, help="Window size for MinHash splitting.")
-    parser.add_argument("--max_cluster", type=int, default=1000, help="Maximum number of sequences to cluster per round.")
-    parser.add_argument("--min_samples_primary", type=int, default=5, help="Minimum numbers of samples for to create a cluster on primary  DBSCAN stage.")
+    parser.add_argument("--max_per_round", type=int, default=1000, help="Maximum number of sequences to cluster per round.")
+    parser.add_argument("--max_per_cluster", type=int, default=3000, help="Maximum number of sequences to include in a cluster.")
+    parser.add_argument("--min_samples_primary", type=int, default=5, help="Minimum numbers of samples for to create a cluster on primary DBSCAN stage.")
     parser.add_argument("--min_samples_secondary", type=int, default=1, help="Minimum numbers of samples for to create a cluster on secondary DBSCAN stage (noise from primary stage).")
     parser.add_argument("--centroid", action="store_true", help="Calculate the centroid for each cluster. Centroid sequences are returned in the 'sequence' field.")
     parser.add_argument("--outdir", default='.', help="Output directory.")
@@ -504,7 +505,7 @@ def main():
         start, round_num, win_res = 0, 1, {}
         while data:
             clusters, data, start = cluster_seqs(
-                data, args.max_cluster, args.dist, f'{round_num}_{window}',
+                data, args.max_per_round, args.dist, f'{round_num}_{window}',
                 start, args.outdir, window, dist_cache,
                 args.min_samples_primary, args.min_samples_secondary
             )
@@ -525,6 +526,9 @@ def main():
 
     cluster_list: List[dict] = []
     for key, members in cluster_map.items():
+        # create subset based on specified max cluster size
+        subset = random.sample(members, args.max_per_cluster) if len(members) > args.max_per_cluster else members
+
         # compute per-cluster min/max distances on full sketches
         min_d, max_d = compute_cluster_min_max(members, full_mh_map, dist_cache)
         row = {
@@ -532,6 +536,7 @@ def main():
             'segment': args.segment,
             'cluster': key,
             'members': members,
+            'subset': subset,
             'dist_range': [min_d, max_d]
         }
         cluster_list.append(row)
@@ -543,7 +548,7 @@ def main():
 
     # Emit distance matrices for problematic clusters
     for row in cluster_list:
-        maybe_emit_cluster_distance_matrix(
+        export_problematic_clusters(
             taxon=args.taxon,
             segment=args.segment,
             cluster_id=row["cluster"],
@@ -556,8 +561,8 @@ def main():
 
     if args.centroid:
         for i, row in enumerate(cluster_list):
-            members = row.get("members", [])
-            cid, ref = compute_centroids(members, full_mh_map, dist_cache, seqs)
+            subset = row.get("subset", [])
+            cid, ref = compute_centroids(subset, full_mh_map, dist_cache, seqs)
             row["sequence"] = ref
             cluster_list[i] = row
 

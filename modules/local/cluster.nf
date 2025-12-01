@@ -24,7 +24,8 @@ process CLUSTER {
         --fasta ${seqs} \\
         --taxon "${taxon}" \\
         --segment "${segment}" \\
-        --max_cluster ${params.max_cluster} \\
+        --max_per_cluster ${params.max_per_cluster} \\
+        --max_per_round ${params.max_per_round} \\
         --dist ${params.dist_threshold} \\
         --window_size ${params.window_size} \\
         --ksize ${params.ksize} \\
