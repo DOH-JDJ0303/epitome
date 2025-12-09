@@ -14,11 +14,11 @@ from datetime import datetime
 from collections import OrderedDict
 from typing import List, Dict, Any, Tuple, Optional
 import screed
-import sourmash
+import sourmash as sm
 import numpy as np
 from sklearn.cluster import DBSCAN
 
-from epitome_utils import sanitize_filename, detect_and_read, normalize_keys, logging_config
+from epitome_utils import sanitize_filename, DistanceCache, logging_config, build_full_minhash_map, _distance, compute_matrix, detect_and_read, normalize_keys
 
 # -------------------------------
 #  GLOBAL CONFIG
@@ -129,162 +129,332 @@ def drop_na(data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 rec.pop(k)
     return data
 
-def group_segments(
+def group_segments( 
     metadata: List[Dict[str, Any]],
     ksize: int,
     scaled: int,
-    dist: float = 0.5,
+    dist: float = 0.25,
     keep_singletons: bool = False,
+    unassigned_csv: str = 'unassigned.csv',
 ) -> Dict[str, List[Dict[str, Any]]]:
-    LOGGER.info("Grouping segments (ksize=%d, scaled=%d, dist=%.3f, keep_singletons=%s)",
-                ksize, scaled, dist, keep_singletons)
+    """
+    Group sequences into segments based on MinHash containment and segment labels.
 
-    def _concat_seq(recs: List[Dict[str, Any]]) -> str:
-        return "".join(rec.get("sequence", "") for rec in recs)
+    Steps:
+      1. Build per-accession MinHash map.
+      2. Build initial segment assignments (from 'segment' field) and segment-level hash totals.
+      3. Build segment-global MinHashes from those totals.
+      4. Compute pairwise segment-global overlaps.
+      5. Reassign members to the best-matching segment (if another segment explains them better).
+      6. Rebuild segment-global hashes.
+      7. Merge similar segments whose globals are highly overlapping.
+      8. Rebuild segment-global hashes after merges.
+      9. Try to assign previously unassigned accessions based on containment to merged segment globals.
+     10. Rebuild segment-global hashes.
+     11. Return final {segment: [metadata records]} mapping.
 
-    def _mk_mh(seq: str, track_abundance: bool) -> sourmash.MinHash:
-        mh = sourmash.MinHash(n=0, ksize=ksize, scaled=scaled, track_abundance=track_abundance)
-        mh.add_sequence(seq, force=True)
-        return mh
+    If unassigned_csv is provided, a CSV of remaining unassigned accessions is written.
+    """
+    n_records = len(metadata)
+    LOGGER.info(
+        f"Grouping segments: {n_records} records (ksize={ksize}, scaled={scaled}, "
+        f"dist={dist:.3f}, keep_singletons={keep_singletons})"
+    )
 
-    def _cluster_with_noise(D: np.ndarray, ids: List[str], eps: float) -> Dict[int, List[str]]:
-        db = DBSCAN(eps=float(eps), min_samples=1, metric="precomputed").fit(D)
-        labels = db.labels_
-        clusters: Dict[int, List[str]] = {}
-        max_cluster = max(labels) if len(labels) else -1
-        for i, lbl in enumerate(labels):
-            if lbl == -1:
-                max_cluster += 1
-                lbl = max_cluster
-            clusters.setdefault(int(lbl), []).append(ids[i])
-        LOGGER.debug("DBSCAN produced %d clusters on %d ids", len(clusters), len(ids))
-        return clusters
+    if not metadata:
+        LOGGER.warning("No metadata records provided to group_segments; returning empty groups.")
+        return {}
 
-    def compute_matrix(
-        mh1: Dict[str, sourmash.MinHash],
-        mh2: Dict[str, sourmash.MinHash],
-    ) -> Tuple[np.ndarray, List[str]]:
-        ids = sorted(set(mh1.keys()) & set(mh2.keys()))
-        n = len(ids)
-        D = np.zeros((n, n), dtype=float)
+    # 1) Build MinHash map once
+    LOGGER.info(f"Building MinHash map for {n_records} accessions")
+    mh_map = build_full_minhash_map(
+        {r["accession"]: r["sequence"] for r in metadata},
+        ksize=ksize,
+        scaled=scaled,
+    )
 
-        for i in range(n):
-            ai = ids[i]
-            for j in range(i + 1, n):
-                aj = ids[j]
-                d = 1.0 - mh1[ai].max_containment(mh2[aj])
-                D[i, j] = D[j, i] = d
-
-        np.fill_diagonal(D, 0.0)
-        LOGGER.debug(f"Computed distance matrix of shape {D.shape} for {n} ids")
-        return D, ids
-
-    assigned: Dict[str, List[Dict[str, Any]]] = {}
+    # 2) First pass: assign to segments (if labeled) and accumulate hashes
+    assigned: Dict[str, Dict[str, Any]] = {}
     unassigned: Dict[str, Dict[str, Any]] = {}
+    orig_seg_counts: Dict[str, int] = {}
+
+    n_with_seg = 0
+    n_without_seg = 0
+
     for rec in metadata:
+        acc = rec["accession"]
         seg = rec.get("segment")
+
         if seg:
-            seg = _sanitize_str(rec.get("segment"))
-            assigned.setdefault(seg, []).append(rec)
+            n_with_seg += 1
+            seg = _sanitize_str(seg)
+
+            orig_seg_counts[seg] = orig_seg_counts.get(seg, 0) + 1
+
+            if seg not in assigned:
+                assigned[seg] = {"members": [], "hashes": {}}
+
+            assigned[seg]["members"].append(acc)
+
+            # Accumulate hashes for this segment
+            _mh = mh_map[acc]
+            seg_hashes = assigned[seg]["hashes"]
+            for h, cnt in _mh.hashes.items():
+                seg_hashes[h] = seg_hashes.get(h, 0) + cnt
         else:
-            unassigned[rec["accession"]] = rec
+            n_without_seg += 1
+            unassigned[acc] = rec
 
-    LOGGER.info(f"Assigned segments: {len(assigned)} groups; Unassigned records: {len(unassigned)} ({round(100*len(unassigned)/len(metadata), 1)}%)")
+    LOGGER.info(
+        f"Initial segment assignment: {n_with_seg} with segment label, {n_without_seg} without"
+    )
+    LOGGER.info(f"Found {len(assigned)} initial labeled segments")
 
-    group_full: Dict[str, sourmash.MinHash] = {}
-    group_core: Dict[str, sourmash.MinHash] = {}
+    def build_segment_globals(assigned_dict: Dict[str, Dict[str, Any]]) -> Dict[str, sm.MinHash]:
+        """Helper to build segment-level MinHash objects from assigned members."""
+        segment_globals: Dict[str, sm.MinHash] = {}
+        for seg, data in assigned_dict.items():
+            mh = sm.MinHash(
+                n=0,
+                scaled=scaled,
+                ksize=ksize,
+                seed=11,
+                track_abundance=True,
+            )
+            mh.set_abundances(data["hashes"])
+            segment_globals[seg] = mh
+        return segment_globals
 
-    for seg, records in assigned.items():
-        seq = _concat_seq(records)
-        if not seq:
-            LOGGER.debug(f"Skipping empty sequence group '{seg}'")
+    # 3) Build initial segment-level MinHash objects
+    LOGGER.info(f"Building segment-global MinHashes for {len(assigned)} segments")
+    segment_globals = build_segment_globals(assigned)
+
+    # 4) Precompute all pairwise overlaps (symmetric)
+    segments = list(segment_globals.keys())
+    global_overlaps: Dict[str, set] = {k: set() for k in segments}
+    LOGGER.info(f"Computing pairwise segment global overlaps (threshold={dist:.3f})")
+
+    for i, k1 in enumerate(segments):
+        v1 = segment_globals[k1]
+        for k2 in segments[i + 1 :]:  # upper triangle only
+            v2 = segment_globals[k2]
+            d12 = v1.contained_by_weighted(v2)
+            d21 = v2.contained_by_weighted(v1)
+
+            if d12 > dist:
+                global_overlaps[k1].add(k2)
+            if d21 > dist:
+                global_overlaps[k2].add(k1)
+
+    n_with_overlap = sum(1 for s, ovs in global_overlaps.items() if ovs)
+    LOGGER.info(
+        f"Segment overlap graph: {n_with_overlap} segments with overlaps, "
+        f"{len(segments) - n_with_overlap} isolated segments"
+    )
+
+    # 5) Reassign members to best-matching segments
+    reassignments: List[Tuple[str, str, str]] = []  # (acc, old_seg, new_seg)
+
+    LOGGER.info("Reassigning members to best-matching segments based on containment")
+
+    for seg, overlap in global_overlaps.items():
+        if not overlap:
             continue
 
-        mh_full = _mk_mh(seq, track_abundance=True)
-        group_full[seg] = mh_full
+        candidates = list(overlap) + [seg]
+        candidate_mh = {cand: segment_globals[cand] for cand in candidates}
 
-        mh_core = sourmash.MinHash(n=0, ksize=ksize, scaled=scaled, track_abundance=False)
-        keep_all = (len(records) == 1)
-        for h, count in mh_full.hashes.items():
-            if keep_all or count > 1:
-                mh_core.add_hash(h)
-        group_core[seg] = mh_core
+        for acc in assigned[seg]["members"]:
+            acc_mh = mh_map[acc]
 
-    D, ids = compute_matrix(group_full, group_core)
-    clusters = _cluster_with_noise(D, ids, dist)
+            max_contain = 0.0
+            orig_contain = 0.0
+            best_assign = seg
 
-    final: Dict[str, List[Dict[str, Any]]] = {}
-    for seg_list in clusters.values():
-        if len(seg_list) == 1:
-            seg = seg_list[0]
-            final[seg] = assigned.get(seg, []).copy()
-            continue
+            for cand_seg in candidates:
+                d = candidate_mh[cand_seg].contained_by_weighted(acc_mh)
+                if cand_seg == seg:
+                    orig_contain = d
+                if d > max_contain:
+                    max_contain = d
+                    best_assign = cand_seg
 
-        common_name = max(
-            seg_list,
-            key=lambda s: (len(assigned.get(s, [])), -ord(s[0]) if s else 0),
+            if best_assign != seg and max_contain > orig_contain:
+                reassignments.append((acc, seg, best_assign))
+
+    LOGGER.info(f"Planned {len(reassignments)} member reassignments among segments")
+
+    # Apply reassignments
+    for acc, old_seg, new_seg in reassignments:
+        LOGGER.info(f"{acc}: {old_seg} -> {new_seg}")
+        assigned[old_seg]["members"].remove(acc)
+        assigned[new_seg]["members"].append(acc)
+
+    # 6) Rebuild segment-level hash totals after reassignments
+    LOGGER.info("Rebuilding segment hash totals after reassignments")
+    for seg in assigned:
+        seg_hashes: Dict[int, int] = {}
+        for acc in assigned[seg]["members"]:
+            _mh = mh_map[acc]
+            for h, cnt in _mh.hashes.items():
+                seg_hashes[h] = seg_hashes.get(h, 0) + cnt
+        assigned[seg]["hashes"] = seg_hashes
+
+    segment_globals = build_segment_globals(assigned)
+
+    # 7) Compare globals and merge segments that meet distance threshold
+    segments = list(segment_globals.keys())
+    merge_map: Dict[str, str] = {}  # source_seg -> target_seg
+    LOGGER.info(f"Merging segments based on global containment (threshold={dist:.3f})")
+
+    for i, k1 in enumerate(segments):
+        if k1 in merge_map:
+            continue  # already marked for merging
+
+        v1 = segment_globals[k1]
+        for k2 in segments[i + 1 :]:
+            if k2 in merge_map:
+                continue
+
+            v2 = segment_globals[k2]
+            d12 = v1.contained_by_weighted(v2)
+            d21 = v2.contained_by_weighted(v1)
+
+            # If either direction meets threshold, consider merging
+            if d12 >= dist or d21 >= dist:
+                # Original metadata-based counts
+                k1_orig = orig_seg_counts.get(k1, 0)
+                k2_orig = orig_seg_counts.get(k2, 0)
+
+                if k1_orig > k2_orig:
+                    survivor, merged = k1, k2
+                elif k2_orig > k1_orig:
+                    survivor, merged = k2, k1
+                else:
+                    # Tie-break: use current member counts
+                    k1_curr = len(assigned[k1]["members"])
+                    k2_curr = len(assigned[k2]["members"])
+                    if k1_curr >= k2_curr:
+                        survivor, merged = k1, k2
+                    else:
+                        survivor, merged = k2, k1
+
+                merge_map[merged] = survivor
+                LOGGER.info(
+                    "Merging segment %s -> %s "
+                    "(orig_counts: %s=%d, %s=%d; curr_sizes: %s=%d, %s=%d)",
+                    merged, survivor,
+                    k1, k1_orig, k2, k2_orig,
+                    k1, len(assigned[k1]["members"]),
+                    k2, len(assigned[k2]["members"]),
+                )
+
+                # If k1 got merged into k2, stop comparing k1 to later segments
+                if merged == k1:
+                    break
+
+    # Apply merges
+    LOGGER.info(f"Applying {len(merge_map)} segment merges")
+    for source_seg, target_seg in merge_map.items():
+        # Follow merge chain to find ultimate target
+        final_target = target_seg
+        while final_target in merge_map:
+            final_target = merge_map[final_target]
+
+        n_source = len(assigned[source_seg]["members"])
+        LOGGER.info(
+            f"Final merge path: {source_seg} -> {final_target} ({n_source} members moved)"
         )
-        merged: List[Dict[str, Any]] = []
-        for s in seg_list:
-            merged.extend(assigned.get(s, []))
-        final[common_name] = merged
+        assigned[final_target]["members"].extend(assigned[source_seg]["members"])
+        del assigned[source_seg]
 
-    final_mh: Dict[str, sourmash.MinHash] = {}
-    for seg, recs in final.items():
-        seq = _concat_seq(recs)
-        if not seq:
-            continue
-        final_mh[seg] = _mk_mh(seq, track_abundance=False)
+    # 8) Rebuild segment-level hash totals again after merges
+    LOGGER.info("Rebuilding segment hash totals after merges")
+    for seg in assigned:
+        seg_hashes: Dict[int, int] = {}
+        for acc in assigned[seg]["members"]:
+            _mh = mh_map[acc]
+            for h, cnt in _mh.hashes.items():
+                seg_hashes[h] = seg_hashes.get(h, 0) + cnt
+        assigned[seg]["hashes"] = seg_hashes
 
-    leftovers: Dict[str, Tuple[Dict[str, Any], Optional[sourmash.MinHash]]] = {}
+    segment_globals = build_segment_globals(assigned)
+
+    # 9) Assign unassigned sequences that meet distance threshold
+    LOGGER.info(
+        f"Attempting to assign {len(unassigned)} previously unassigned accessions to segments"
+    )
+    newly_assigned: List[Tuple[str, str, Dict[str, Any]]] = []
+
     for acc, rec in unassigned.items():
-        seq = rec.get("sequence", "")
-        if not seq or not final_mh:
-            leftovers[acc] = (rec, None)
-            continue
-
-        mh = _mk_mh(seq, track_abundance=False)
-
+        acc_mh = mh_map[acc]
         best_seg = None
-        best_d = 1.0
-        for seg, mh2 in final_mh.items():
-            d = 1.0 - float(mh.contained_by(mh2))
-            if d < best_d:
-                best_d = d
+        max_contain = 0.0
+
+        for seg, seg_mh in segment_globals.items():
+            d = seg_mh.contained_by_weighted(acc_mh)
+            if d >= dist and d > max_contain:
+                max_contain = d
                 best_seg = seg
 
-        if best_seg is not None and best_d < dist:
-            final[best_seg].append(rec)
-        else:
-            leftovers[acc] = (rec, mh)
+        if best_seg:
+            LOGGER.info(
+                f"{acc}: unassigned -> {best_seg} (containment={max_contain:.3f})"
+            )
+            newly_assigned.append((acc, best_seg, rec))
 
-    LOGGER.info(f"Post-assignment groups: {len(final)}; leftovers: {len(leftovers)} ({round(100*len(leftovers)/len(metadata), 1)}%)")
+    LOGGER.info(f"Newly assigned {len(newly_assigned)} previously unassigned accessions")
 
-    if not leftovers:
-        return final
-    if not keep_singletons:
-        LOGGER.info("Discarding singletons")
-        return final
+    # Apply new assignments and update unassigned set
+    for acc, seg, rec in newly_assigned:
+        if seg not in assigned:
+            assigned[seg] = {"members": [], "hashes": {}}
+        assigned[seg]["members"].append(acc)
+        unassigned.pop(acc, None)
+
+    # 10) Rebuild segment-level hash totals one last time
+    LOGGER.info("Rebuilding segment hash totals after assigning unassigned sequences")
+    for seg in assigned:
+        seg_hashes: Dict[int, int] = {}
+        for acc in assigned[seg]["members"]:
+            _mh = mh_map[acc]
+            for h, cnt in _mh.hashes.items():
+                seg_hashes[h] = seg_hashes.get(h, 0) + cnt
+        assigned[seg]["hashes"] = seg_hashes
+
+    # 11) Optionally log and save remaining unassigned accessions
+    n_unassigned_final = len(unassigned)
+    if n_unassigned_final:
+        LOGGER.info(
+            f"After grouping, {n_unassigned_final} accessions remain unassigned to any segment"
+        )
+        if unassigned_csv:
+            try:
+                os.makedirs(os.path.dirname(unassigned_csv) or ".", exist_ok=True)
+                with open(unassigned_csv, "w", encoding="utf-8") as f:
+                    f.write("accession\n")
+                    for acc in sorted(unassigned.keys()):
+                        f.write(f"{acc}\n")
+                LOGGER.info(f"Wrote unassigned accessions to {unassigned_csv}")
+            except Exception:
+                LOGGER.exception(f"Failed to write unassigned accessions CSV: {unassigned_csv}")
     else:
-        LOGGER.info("Naming singletons")
-        singletons = {acc: mh for acc, (_, mh) in leftovers.items() if mh is not None}
-        if len(singletons) == 1:
-            (acc, _mh), = leftovers.items()
-            final.setdefault("segment_group_0", []).append(leftovers[acc][0])
-        elif len(singletons) > 1:
-            D2, ids2 = compute_matrix(singletons, singletons)
-            clusters2 = _cluster_with_noise(D2, ids2, dist)
-            for lbl_ids in clusters2.values():
-                grp = f"segment_group_{int(list(clusters2.keys())[0])}"
-                for acc in lbl_ids:
-                    final.setdefault(grp, []).append(leftovers[acc][0])
-        else:
-            for acc, (rec, _mh) in leftovers.items():
-                final.setdefault("segment_group_0", []).append(rec)
+        LOGGER.info("All accessions assigned to segments")
 
-        LOGGER.info(f"After singleton clustering, groups: {len(final)}")
+    # Build final mapping of segment -> list of metadata records
+    meta_map = {r["accession"]: r for r in metadata}
+    final: Dict[str, List[Dict[str, Any]]] = {}
+
+    for seg, data in assigned.items():
+        for acc in data["members"]:
+            final.setdefault(seg, []).append(meta_map[acc])
+
+    LOGGER.info(f"Final grouping produced {len(final)} segments")
+    for seg, recs in final.items():
+        LOGGER.debug(f"Segment {seg}: {len(recs)} members")
 
     return final
+
 
 def load_fastas(files):
     fasta = {}

@@ -17,52 +17,16 @@ import sourmash
 import numpy as np
 from sklearn.cluster import DBSCAN
 
-from epitome_utils import sanitize_filename, DistanceCache, logging_config
+from epitome_utils import sanitize_filename, DistanceCache, logging_config, build_full_minhash_map, _distance, compute_matrix
 
 # -------------------------------
 #  GLOBAL CONFIG
 # -------------------------------
 LOGGER = logging_config()
 
-
-# -------------------------------
-#  HELPERS (de-duplicated)
-# -------------------------------
-
-def _distance(
-    a: str,
-    b: str,
-    *,
-    scope: str,
-    mh_map: Dict[str, sourmash.MinHash],
-    cache: DistanceCache
-) -> float:
-    """
-    Cached pairwise distance between two IDs for a given scope ('full' or 'win:XYZ').
-    """
-    cached = cache.get(scope, a, b)
-    if cached is not None:
-        return float(cached)
-    d = mh_map[a].containment_ani(mh_map[b]).dist
-    cache.set(scope, a, b, float(d))
-    return float(d)
-
-
 # -------------------------------
 #  FUNCTIONS
 # -------------------------------
-
-def build_full_minhash_map(seqs: Dict[str, str], ksize: int, scaled: int) -> Dict[str, sourmash.MinHash]:
-    """
-    Build a MinHash object for each sequence.
-    """
-    mh_map: Dict[str, sourmash.MinHash] = {}
-    for sid, s in seqs.items():
-        mh = sourmash.MinHash(n=0, ksize=ksize, scaled=scaled)
-        mh.add_sequence(s, force=True)
-        mh_map[sid] = mh
-    return mh_map
-
 
 def load_seqs(fasta: str, ksize: int, scaled: int, window_size: int) -> Tuple[Dict[str, Dict[str, Dict[str, Any]]], Dict[str, str]]:
     """
@@ -123,25 +87,6 @@ def select_reps(data: Dict[str, dict]) -> Dict[str, dict]:
             result[k] = v
             seen.add(c)
     return result
-
-
-def compute_matrix(data: Dict[str, dict], window_scope: str, dist_cache: DistanceCache) -> Tuple[np.ndarray, List[str]]:
-    """
-    Compute pairwise distance matrix for sequences in a window using cached distances.
-    """
-    ids = sorted(data)
-    n = len(ids)
-    mat = np.zeros((n, n), dtype=float)
-    mh_map = {sid: data[sid]['mh'] for sid in ids}
-    for i in range(n):
-        ai = ids[i]
-        for j in range(i + 1, n):
-            aj = ids[j]
-            d = _distance(ai, aj, scope=window_scope, mh_map=mh_map, cache=dist_cache)
-            mat[i, j] = mat[j, i] = d
-    np.fill_diagonal(mat, 0.0)
-    return mat, ids
-
 
 def create_clusters(
     data: Dict[str, dict],

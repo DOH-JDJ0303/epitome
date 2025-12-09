@@ -15,6 +15,8 @@ from datetime import datetime
 from typing import Any, Dict, Iterable, List, Mapping, Tuple
 import logging
 import sys
+import sourmash as sm
+import numpy as np
 
 def logging_config(log_level='INFO'):
     # Get script name
@@ -44,19 +46,6 @@ def normalize_keys(d: Mapping[str, Any]) -> Dict[str, Any]:
 
 # ---------- Lightweight Symmetric Cache ---------- #
 
-class DistanceCache:
-    """Symmetric key cache: cache[(scope, a, b)] == cache[(scope, b, a)]."""
-    def __init__(self):
-        self._d: Dict[Tuple[str, Any, Any], Any] = {}
-
-    def _key(self, scope: str, a: Any, b: Any) -> Tuple[str, Any, Any]:
-        return (scope, a, b) if a <= b else (scope, b, a)
-
-    def get(self, scope: str, a: Any, b: Any) -> Any:
-        return self._d.get(self._key(scope, a, b))
-
-    def set(self, scope: str, a: Any, b: Any, val: Any) -> None:
-        self._d[self._key(scope, a, b)] = val
 
 
 # ---------- JSON / CSV Readers ---------- #
@@ -205,16 +194,64 @@ def is_date_string(v: Any) -> bool:
     return False
 
 
-__all__ = [
-    "sanitize_filename",
-    "normalize_keys",
-    "DistanceCache",
-    "read_json",
-    "read_csv",
-    "detect_and_read",
-    "read_jsonl",
-    "load_json",
-    "load_json_or_jsonl",
-    "load_jsonl_gz_by_key",
-    "is_date_string"
-]
+class DistanceCache:
+    """Symmetric key cache: cache[(scope, a, b)] == cache[(scope, b, a)]."""
+    def __init__(self):
+        self._d: Dict[Tuple[str, Any, Any], Any] = {}
+
+    def _key(self, scope: str, a: Any, b: Any) -> Tuple[str, Any, Any]:
+        return (scope, a, b) if a <= b else (scope, b, a)
+
+    def get(self, scope: str, a: Any, b: Any) -> Any:
+        return self._d.get(self._key(scope, a, b))
+
+    def set(self, scope: str, a: Any, b: Any, val: Any) -> None:
+        self._d[self._key(scope, a, b)] = val
+
+
+
+def build_full_minhash_map(seqs: Dict[str, str], ksize: int, scaled: int) -> Dict[str, sm.MinHash]:
+    """
+    Build a MinHash object for each sequence.
+    """
+    mh_map: Dict[str, sm.MinHash] = {}
+    for sid, s in seqs.items():
+        mh = sm.MinHash(n=0, ksize=ksize, scaled=scaled)
+        mh.add_sequence(s, force=True)
+        mh_map[sid] = mh
+    return mh_map
+
+def _distance(
+    a: str,
+    b: str,
+    *,
+    scope: str,
+    mh_map: Dict[str, sm.MinHash],
+    cache: DistanceCache
+) -> float:
+    """
+    Cached pairwise distance between two IDs for a given scope ('full' or 'win:XYZ').
+    """
+    cached = cache.get(scope, a, b)
+    if cached is not None:
+        return float(cached)
+    d = mh_map[a].containment_ani(mh_map[b]).dist
+    cache.set(scope, a, b, float(d))
+    return float(d)
+
+def compute_matrix(data: Dict[str, dict], window_scope: str, dist_cache: DistanceCache) -> Tuple[np.ndarray, List[str]]:
+    """
+    Compute pairwise distance matrix for sequences in a window using cached distances.
+    """
+    ids = sorted(data)
+    n = len(ids)
+    mat = np.zeros((n, n), dtype=float)
+    mh_map = {sid: data[sid]['mh'] for sid in ids}
+    for i in range(n):
+        ai = ids[i]
+        for j in range(i + 1, n):
+            aj = ids[j]
+            d = _distance(ai, aj, scope=window_scope, mh_map=mh_map, cache=dist_cache)
+            mat[i, j] = mat[j, i] = d
+    np.fill_diagonal(mat, 0.0)
+    return mat, ids
