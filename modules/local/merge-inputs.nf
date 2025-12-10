@@ -4,21 +4,35 @@ process MERGE_INPUTS {
     stageInMode 'copy'
 
     input:
-    tuple val(taxon), val(segment), path(assembly), path(metadata)
+    tuple val(taxon), path(assembly), path(metadata), val(segmented)
 
     output:
-    tuple val(taxon), val(segment), path("${prefix}.assembly.fa.gz"), path("${prefix}.metadata.csv"), emit: merged
+    tuple val(taxon), path("*.fa.gz"),             emit: fa
+    tuple val(taxon), path("*.metadata.jsonl.gz"), emit: meta
+    tuple val(taxon), path("manifest.csv"),        emit: man
+    path "versions.yml",                           emit: versions
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
-    prefix = "${taxon.replaceAll(' ','_')}-${segment}"
+    def args         = task.ext.args   ?: ''
+    prefix = "${taxon.replaceAll(' ','_')}"
+    tool = "epitome_inputs.py"
     """
-    # combine assembly files
-    gzip ${assembly.join(' ')} || true
-    cat *.gz > ${prefix}.assembly.fa.gz
     # combine metadata
-    merge-tables.R && mv merged.csv ${prefix}.metadata.csv
+    ${tool} \\
+        --taxon "${taxon}" \\
+        --assembly ${assembly} \\
+        --metadata ${metadata} \\
+        ${segmented ? '--segmented' : ''} \\
+        ${args}
+
+
+    # version info
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        ${tool}: "\$(${tool} --version 2>&1 | tr -d '\\r')"
+    END_VERSIONS
     """
 }

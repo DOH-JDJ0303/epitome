@@ -1,7 +1,7 @@
 {
     "$schema": "http://json-schema.org/draft-07/schema",
-    "$id": "https://raw.githubusercontent.com/nf-core/refmaker/master/nextflow_schema.json",
-    "title": "nf-core/refmaker pipeline parameters",
+    "$id": "https://raw.githubusercontent.com/doh-jdj0303/epitome/master/nextflow_schema.json",
+    "title": "doh-jdj0303/epitome pipeline parameters",
     "description": "Pipeline that makes reference genomes for each unique cluster of a species.",
     "type": "object",
     "definitions": {
@@ -19,32 +19,65 @@
                     "type": "string",
                     "format": "file-path",
                     "exists": true,
-                    "description": "Path to comma-separated file containing information about the samples in the experiment.",
-                    "help_text": "You will need to create a design file with information about the samples in your experiment before running the pipeline. Use this parameter to specify its location. It has to be a comma-separated file with 3 columns, and a header row. See [usage docs](https://nf-co.re/refmaker/usage#samplesheet-input).",
+                    "description": "Path to comma-separated file containing input information.",
                     "fa_icon": "fas fa-file-csv"
                 },
                 "outdir": {
                     "type": "string",
                     "format": "directory-path",
-                    "description": "The output directory where the results will be saved. You have to use absolute paths to storage on Cloud infrastructure.",
+                    "description": "The output directory where the results will be saved.",
                     "fa_icon": "fas fa-folder-open"
+                },
+                "len_threshold": {
+                    "type": "number",
+                    "default": 0.2,
+                    "description": "Maximum length difference (+/-) of an input sequence compared to the expected sequence size.",
+                    "fa_icon": "fas fa-chart-pie"
+                },
+                "amb_threshold": {
+                    "type": "number",
+                    "default": 0.02,
+                    "description": "Maximum percent of bases that can be ambiguous (N) in an input sequence.",
+                    "fa_icon": "fas fa-chart-pie"
                 },
                 "email": {
                     "type": "string",
                     "description": "Email address for completion summary.",
                     "fa_icon": "fas fa-envelope",
                     "help_text": "Set this parameter to your e-mail address to get a summary e-mail with details of the run sent to you when the workflow exits. If set in your user config file (`~/.nextflow/config`) then you don't need to specify this on the command line for every run.",
-                    "pattern": "^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$"
+                    "pattern": "^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$",
+                    "hidden": true
                 },
                 "multiqc_title": {
                     "type": "string",
                     "description": "MultiQC report title. Printed as page header, used for filename if not otherwise specified.",
-                    "fa_icon": "fas fa-file-signature"
+                    "fa_icon": "fas fa-file-signature",
+                    "hidden": true
                 }
             }
         },
-        "other_options": {
-            "title": "Other options",
+        "subworkflow_options": {
+            "title": "Subworkflow options",
+            "type": "object",
+            "description": "",
+            "default": "",
+            "properties": {
+                "ncbi": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "If data should be pulled from NCBI.",
+                    "fa_icon": "fas fa-network-wired"
+                },
+                "create": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "If reference should be created.",
+                    "fa_icon": "fas fa-network-wired"
+                }
+            }
+        },
+        "clustering_options": {
+            "title": "Clustering Options",
             "type": "object",
             "description": "",
             "default": "",
@@ -54,36 +87,6 @@
                     "default": 0.02,
                     "description": "Target distance threshold (1-%ANI/100). It is often necessary to add approx. 0.03 to this value to reach the target."
                 },
-                "amb_threshold": {
-                    "type": "number",
-                    "default": 0.02,
-                    "description": "Maximum percent of bases that can be ambiguous (N) in an input sequence."
-                },
-                "len_threshold": {
-                    "type": "number",
-                    "default": 0.2,
-                    "description": "Maximum length difference (+/-) of an input sequence compared to the expected sequence size."
-                },
-                "max_cluster": {
-                    "type": "integer",
-                    "default": 10000,
-                    "description": "Maximum number of sequences that will be included in the initial clustering step. Increasing this value may result in segmentation faults."
-                },
-                "max_align": {
-                    "type": "integer",
-                    "default": 10000,
-                    "description": "Maximum number of sequences that will be aligned per cluster."
-                },
-                "ncbi": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "If data should be pulled from NCBI."
-                },
-                "create": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "If reference should be created."
-                },
                 "ksize": {
                     "type": "integer",
                     "default": 31,
@@ -91,8 +94,46 @@
                 },
                 "scaled": {
                     "type": "integer",
-                    "default": 10,
+                    "default": 100,
                     "description": "Scaled option to use for Sourmash."
+                },
+                "window_size": {
+                    "type": "integer",
+                    "default": 8000,
+                    "description": "Window size for MinHash splitting."
+                },
+                "max_per_round": {
+                    "type": "integer",
+                    "default": 1000,
+                    "description": "Maximum number of sequences to include per round of clustering."
+                },
+                "max_per_cluster": {
+                    "type": "integer",
+                    "default": 1000,
+                    "description": "Maximum number of sequences to include in the final clusters."
+                }
+            }
+        },
+        "reference_options": {
+            "title": "Reference options",
+            "type": "object",
+            "description": "",
+            "default": "",
+            "properties": {
+                "max_align": {
+                    "type": "integer",
+                    "default": 1000,
+                    "description": "Maximum number of sequences that will be aligned per cluster."
+                },
+                "consensus": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Create references using consensus method."
+                },
+                "centroid": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Create references using centroid method."
                 }
             }
         },
@@ -102,12 +143,6 @@
             "fa_icon": "fas fa-dna",
             "description": "Reference genome related files and options required for the workflow.",
             "properties": {
-                "genome": {
-                    "type": "string",
-                    "description": "Name of iGenomes reference.",
-                    "fa_icon": "fas fa-book",
-                    "help_text": "If using a reference genome configured in the pipeline using iGenomes, use this parameter to give the ID for the reference. This is then used to build the full paths for all required reference genome files e.g. `--genome GRCh38`. \n\nSee the [nf-core website docs](https://nf-co.re/usage/reference_genomes) for more details."
-                },
                 "fasta": {
                     "type": "string",
                     "format": "file-path",
@@ -116,14 +151,8 @@
                     "pattern": "^\\S+\\.fn?a(sta)?(\\.gz)?$",
                     "description": "Path to FASTA genome file.",
                     "help_text": "This parameter is *mandatory* if `--genome` is not specified. If you don't have a BWA index available this will be generated for you automatically. Combine with `--save_reference` to save BWA index for future runs.",
-                    "fa_icon": "far fa-file-code"
-                },
-                "igenomes_ignore": {
-                    "type": "boolean",
-                    "description": "Do not load the iGenomes reference config.",
-                    "fa_icon": "fas fa-ban",
-                    "hidden": true,
-                    "help_text": "Do not load `igenomes.config` when running the pipeline. You may choose this option if you observe clashes between custom parameters and those supplied in `igenomes.config`."
+                    "fa_icon": "far fa-file-code",
+                    "hidden": true
                 }
             }
         },
@@ -334,7 +363,13 @@
             "$ref": "#/definitions/input_output_options"
         },
         {
-            "$ref": "#/definitions/other_options"
+            "$ref": "#/definitions/subworkflow_options"
+        },
+        {
+            "$ref": "#/definitions/clustering_options"
+        },
+        {
+            "$ref": "#/definitions/reference_options"
         },
         {
             "$ref": "#/definitions/reference_genome_options"

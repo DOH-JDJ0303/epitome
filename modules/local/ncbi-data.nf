@@ -3,44 +3,68 @@ process NCBI_DATA {
     label 'process_low'
 
     input:
-    tuple val(taxon), val(segment_synonyms), val(seg_status)
+    tuple val(taxon)
 
     output:
-    tuple val(taxon), path("genomic.fa.gz"),             emit: genomic
-    tuple val(taxon), path("ncbi-meta.complete.csv"),     emit: complete
-    tuple val(taxon), path("ncbi-meta.report-only.csv"),  emit: reportonly
-    tuple val(taxon), path("ncbi-meta.subtype-only.csv"), emit: subtypeonly
-    path "versions.yml",                                  emit: versions
+    tuple val(taxon), path("*.fa.gz"), path("*.json"), emit: data
+    path "versions.yml",                               emit: versions
 
     when:
     task.ext.when == null || task.ext.when
+    
 
     script:
     args   = task.ext.args ?: ''
-    """    
+    tool = "epitome_ncbi.py"
+    """
+    mkdir data/ || true
+
     #---- NCBI Datasets Genome -----#
-    # download
-    datasets download virus genome taxon "${taxon}" ${args} && unzip ncbi_dataset.zip
-    # clean & compress sequence file
-    cat ncbi_dataset/data/genomic.fna | awk '/^>/ {print \$1; next} {print}' | gzip > genomic.fa.gz
+    # Downloads genome assemblies and associated sample data.
+    # Sample data is currently lacking subtype information (Downloaded below)
+
+    datasets download virus genome taxon \\
+        "${taxon}" \\
+        ${args}
+    
+    unzip ncbi_dataset.zip
+    mv ncbi_dataset/data/genomic.fna data/datasets-genome.fa
+    mv ncbi_dataset/data/data_report.jsonl data/datasets-genome.jsonl
     
     #---- NCBI Datasets Taxon -----#
-    # Download detailed taxonomy data
-    datasets summary taxonomy taxon "${taxon}" --rank species > ncbi-taxids.json
+    # Used to identify the species-level classification
+
+    datasets summary taxonomy taxon \\
+        "${taxon}" \\
+        --rank species \\
+        > data/datasets-taxonomy.json
     
-    #---- NCBI Esearch -----#
-    # Download additional details (those not included with NCBI Datasets)
-    esearch -db nucleotide -query '${taxon}[Organism] AND "complete sequence"[Title]' | \
-       efetch -format docsum -mode json \
-       > ncbi-subtype.json
+    #---- NCBI EDirect -----#
+    # Gather subtype information (Not included in Datasets report)
+
+    cat data/datasets-genome.fa \\
+        | grep '>' \\
+        | cut -f 1 -d ' ' \\
+        | tr -d '>' \\
+        > data/accessions.txt
+
+    epost -db nuccore -input data/accessions.txt \\
+        | efetch -format docsum -mode json \\
+        > data/edirect.json
     
     #---- COMBINE ----#
-    ncbi-data.py --segsyns "${segment_synonyms}" ${seg_status == 'TRUE' ? '--segmented' : ''}
+    ${tool} \\
+        --taxon ${taxon.replace(' ', '_')} \\
+        --datasets_genome_fasta data/datasets-genome.fa \\
+        --datasets_genome_json data/datasets-genome.jsonl \\
+        --datasets_taxonomy data/datasets-taxonomy.json \\
+        --edirect data/edirect.json
 
     # version info
     cat <<-END_VERSIONS > versions.yml
-    "!{task.process}":
+    "${task.process}":
         ncbi-datasets: \$(datasets --version | sed 's/.*: //g')
+        ${tool}: "\$(${tool} --version 2>&1 | tr -d '\\r')"
     END_VERSIONS
     """
 }

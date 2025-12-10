@@ -1,65 +1,60 @@
-# base image
-FROM ubuntu:jammy
+# -----------------------------
+# Build Stage: EPITOME Env
+# -----------------------------
+FROM python:3.11-slim-bullseye AS app
 
-# metadata
-LABEL base.image="ubuntu:jammy"
-LABEL software="EPITOME"
-LABEL software.version="v1.5.0"
-LABEL description="Basic Linux for Running EPITOME Scripts"
-LABEL website="https://github.com/DOH-JDJ0303/bigbacter-nf"
-LABEL license="Apache 2.0"
-LABEL maintainer="Jared Johnson"
-LABEL maintainer.email="jared.johnson@doh.wa.gov"
+ARG SOFTWARENAME_VER="2.0.0"
+ARG SOURMASH_VER="4.9.2"  # use PyPI version (no leading 'v')
 
-# prevents having to enter commands during apt-get install
-ENV DEBIAN_FRONTEND=noninteractive
+LABEL org.opencontainers.image.base.name="python:3.11-slim-bullseye" \
+      org.opencontainers.image.title="EPITOME" \
+      org.opencontainers.image.version="${SOFTWARENAME_VER}" \
+      org.opencontainers.image.description="Dependencies for the EPITOME pipeline" \
+      org.opencontainers.image.url="https://github.com/DOH-JDJ0303/epitome" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.authors="Jared Johnson <jared.johnson@doh.wa.gov>"
 
-# install dependencies
-RUN apt update && \
-    apt -y --no-install-recommends install \
-    ca-certificates \
-    software-properties-common \
-    libssl-dev \
-    zlib1g-dev \
-    libbz2-dev \
-    libreadline-dev \
-    libsqlite3-dev \
-    make \
-    llvm \
-    libncurses5-dev \
-    libncursesw5-dev \
-    libharfbuzz-dev \
-    libfribidi-dev \
-    libcurl4-openssl-dev \
-    libssl-dev \
-    libxml2-dev \
-    xz-utils \
-    tk-dev \
-    libtiff-dev \
-    libffi-dev \
-    liblzma-dev \
-    build-essential \
-    dirmngr \
-    gpg-agent
+ENV DEBIAN_FRONTEND=noninteractive \
+    LC_ALL=C.UTF-8 \
+    LANG=C.UTF-8 \
+    PIP_NO_CACHE_DIR=1
 
-RUN add-apt-repository "deb https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/" && \
-    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys E298A3A825C0D65DFD57CBB651716619E084DAB9 && \
-    apt update
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-RUN apt -y --no-install-recommends install \
-    bc \
-    unzip \
-    tar \
-    gzip \
-    curl \
-    wget \
-    bzip2 \
-    r-base=4.4.2-1.2204.0 \
-    r-base-dev=4.4.2-1.2204.0 \
-    r-recommended=4.4.2-1.2204.0 && \
-    apt-get autoclean && \
-    rm -rf /var/lib/apt/lists/*
-    
-# R packages
-RUN R -e "install.packages(c('tidyverse', 'phangorn','BiocManager', 'remotes'), repos='https://cran.rstudio.com/')"
-RUN R -e "BiocManager::install('treeio'); BiocManager::install('Biostrings'); BiocManager::install('ggtree')"
+# System deps (minimal, runtime-friendly)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential \
+      libatlas-base-dev gfortran liblapack-dev libblas-dev \
+      pkg-config \
+      libfreetype6-dev libpng-dev \
+      git curl wget ca-certificates \
+      procps jq unzip gawk \
+      perl gzip less xz-utils bzip2 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Python deps (no Rust toolchain needed if we use wheels)
+RUN python -m pip install --upgrade pip && \
+    python -m pip install \
+      "matplotlib>=3.3" \
+      scikit-learn \
+      sourmash==${SOURMASH_VER}
+
+# NCBI Entrez Direct (EDirect)
+RUN curl -fsSL https://ftp.ncbi.nlm.nih.gov/entrez/entrezdirect/install-edirect.sh | bash
+ENV PATH="/root/edirect:${PATH}"
+
+# NCBI Datasets CLI + dataformat
+RUN install -d -m 0755 /usr/local/bin && \
+    curl -fsSL -o /usr/local/bin/datasets    https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/datasets && \
+    curl -fsSL -o /usr/local/bin/dataformat  https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/linux-amd64/dataformat && \
+    chmod +x /usr/local/bin/datasets /usr/local/bin/dataformat
+
+WORKDIR /data
+
+# -----------------------------
+# Test Stage
+# -----------------------------
+FROM app AS test
+WORKDIR /test
+# quick sanity checks
+RUN sourmash --version && datasets --version && esearch -db nucleotide -query 'Lomovskayavirus[Organism] AND "complete sequence"[Title]'

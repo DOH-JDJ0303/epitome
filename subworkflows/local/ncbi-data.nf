@@ -3,8 +3,6 @@
 //
 
 include { NCBI_DATA    } from '../../modules/local/ncbi-data'
-include { SEQTK_NCBI   } from '../../modules/local/seqtk_subseq'
-include { MERGE_INPUTS } from '../../modules/local/merge-inputs'
 
 workflow NCBI_DATA_SUBWF {
     take:
@@ -20,83 +18,17 @@ workflow NCBI_DATA_SUBWF {
     */
     // MODULE: Gather NCBI data for taxon
     NCBI_DATA(
-        ch_input
-            .map{ [ it.taxon, it.segmentSynomyms, it.segmented ] }
-            .groupTuple(by: 0)
-            .map{ taxon, segmentSynonyms, segmented -> [ taxon, segmentSynonyms.first(), segmented.first()  ] }
+        ch_input.map{ it.taxon }.unique()
     )
-    NCBI_DATA
-      .out
-      .complete
-      .splitCsv(header: true, quote: '"')
-      .map{ taxon, data -> data + [ taxon: taxon ]}
-      .set{ ch_ncbi_data }
-    ch_ncbi_data
-        .map{ [ it.taxon, it.segment, it ] }
-        .groupTuple(by: [0,1])
-        .map{ taxon, segment, data -> def table = channelToTable(data)
-                                      def fwork = file(workflow.workDir).resolve("${taxon}-${segment}-ncbi-data.csv")
-                                      fwork.text = table
-                                      [ taxon: taxon, segment: segment, file: fwork ] }
-        .set{ ch_ncbi_data_file }
-    
+    ch_versions = ch_versions.mix(NCBI_DATA.out.versions.first())
 
-    /*
-    =============================================================================================================================
-        PARSE SEQUENCES BY TAXON AND SEGMENT
-    =============================================================================================================================
-    */
-    // Combine data with sequences
-    SEQTK_NCBI(
-        NCBI_DATA
-            .out
-            .genomic
-            .combine(ch_ncbi_data.map{ [ it.taxon, it.segment, it.accession ] }.groupTuple(by: [0,1] ), by: 0)
-    )
-    SEQTK_NCBI
+    NCBI_DATA
         .out
-        .sequences
-        .join(ch_ncbi_data_file.map{ [ it.taxon, it.segment, it.file ] }, by: [0,1])
-        .map{ taxon, segment, assembly, metadata -> [ taxon: taxon, segment: segment, assembly: assembly, metadata: metadata ] }
-        .set{ch_input_ncbi}
-    /*
-    =============================================================================================================================
-        MERGE METADATA
-    =============================================================================================================================
-    */
-    // Merge inputs (from NCBI and from the user)
-    MERGE_INPUTS (
-        ch_input_ncbi
-            .concat(ch_input.filter{ it.segment && it.assembly })
-            .map{ [ it.taxon, it.segment, it.assembly, it.metadata ] }
-            .groupTuple(by: [0,1])
-            .map{ taxon, segment, assembly, metadata -> [ taxon, segment, assembly, metadata ] }
-    )
-    MERGE_INPUTS
-        .out
-        .merged
-        .join( ch_input.map{ [ it.taxon, it.segment, it.exclusions ] }, by: [0,1], remainder: true)
-        .filter{ it[2] } // excludes any unmatched 'wg' segments automatically assigned while loading the samplesheet.
-        .map{ taxon, segment, assembly, metadata, exclusions -> [ taxon: taxon, segment: segment, assembly: assembly, metadata: metadata, exclusions: exclusions ? exclusions : [] ] }
-        .set{ ch_input }
+        .data
+        .map{ taxon, assembly, metadata -> [ taxon: taxon, assembly: assembly, metadata: metadata ] }
+        .set{ch_input}
 
     emit:
     input    = ch_input
     versions = ch_versions
-}
-
-/*
-=============================================================================================================================
-    FUNCTIONS
-=============================================================================================================================
-*/
-def channelToTable ( data ){
-    // Gather all keys
-    def allKeys = []
-    data.each{ allKeys = allKeys + it.keySet().toList() }
-    allKeys.unique()
-    // Create table
-    def table = [allKeys.join(',')]
-    data.each{ table = table + [ allKeys.collect{ k -> it.containsKey(k) ? "\"${it[k]}\"" : 'null' }.join(',') ] }
-    return table.join('\n')
 }

@@ -32,12 +32,8 @@ ch_multiqc_custom_methods_description = params.multiqc_methods_description ? fil
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 include { NCBI_DATA_SUBWF } from '../subworkflows/local/ncbi-data'
+include { MERGE_INPUTS    } from '../modules/local/merge-inputs'
 include { CREATE_SUBWF    } from '../subworkflows/local/create'
-
-
-//
-// SUBWORKFLOW: Consisting of a mix of local and nf-core/modules
-//
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -74,14 +70,12 @@ workflow EPITOME {
         .fromPath(params.input)
         .splitCsv(header:true, quote: '"')
         .map{ [ taxon:    it.taxon, 
-                segment:  it.containsKey('segment') ? ( it.segment ? it.segment : 'wg') : 'wg',
-                assembly: it.containsKey('assembly') ? ( it.assembly ? file(it.assembly, checkIfExists: true) : [] ) : [], 
-                metadata: it.containsKey('metadata') ? ( it.metadata ? file(it.metadata, checkIfExists: true) : [] ) : [],
-                segmentSynomyms: it.containsKey('segmentSynonyms') ? ( it.segmentSynonyms ? it.segmentSynonyms : null ) : null,
-                segmented: it.containsKey('segmented') ? ( it.segmented ? it.segmented : 'FALSE' ) : 'FALSE',
+                assembly: it.containsKey('assembly') ? ( it.assembly ? it.assembly.split(';').collect{f -> file(f, checkIfExists: true)} : [] ) : [], 
+                metadata: it.containsKey('metadata') ? ( it.metadata ? it.metadata.split(';').collect{f -> file(f, checkIfExists: true)} : [] ) : [],
+                segmented: it.containsKey('segmented') ? it.segmented.toLowerCase() == 'true' : false,
                 exclusions: it.containsKey('exclusions') ? ( it.exclusions ? file(it.exclusions, checkIfExists: true) : [] ) : [],
-                ]
-                }
+            ]
+        }
         .set{ ch_input }
 
     /*
@@ -94,13 +88,85 @@ workflow EPITOME {
         NCBI_DATA_SUBWF(
             ch_input
         )
-        ch_versions = ch_versions.mix(NCBI_DATA_SUBWF.out.versions.first())
+        ch_versions = ch_versions.mix(NCBI_DATA_SUBWF.out.versions)
         
-        NCBI_DATA_SUBWF
-            .out
-            .input
-            .set{ ch_input }
+        ch_input
+            .concat( NCBI_DATA_SUBWF.out.input )
+            .map{ [it.taxon, it] }
+            .groupTuple()
+            .map { String taxon, List<Map> recs ->
+
+                // Use insertion-ordered sets for unique atomic values
+                def acc = [:].withDefault { new LinkedHashSet() }
+
+                recs.each { rec ->
+                    rec.each { k, v ->
+                        if (v == null) return
+
+                        // --- FLATTEN ANY NESTED LISTS / TUPLES ---
+                        def flatVals
+                        if (v instanceof Collection || v instanceof Object[] ) {
+                            flatVals = v.flatten().findAll { it != null }
+                        } else {
+                            flatVals = [v]
+                        }
+
+                        flatVals.each { acc[k] << it }
+                    }
+                }
+
+                // collapse singletons; multi-value stays a simple list
+                def collapsed = acc.collectEntries { k, set ->
+                    def vals = set as List
+                    [(k): (vals.size() == 1 ? vals[0] : vals)]
+                }
+
+                // explicitly retain grouping key
+                [taxon: taxon] + collapsed
+            }
+            .set { ch_input }
+
     }
+
+    /*
+    =============================================================================================================================
+        MERGE INPUTS
+    =============================================================================================================================
+    */
+    // Reformat and merge inputs (from NCBI and the user)
+    MERGE_INPUTS (
+        ch_input.map{ [ it.taxon, it.assembly, it.metadata, it.segmented ] }
+    )
+    ch_versions = ch_versions.mix(MERGE_INPUTS.out.versions.first())
+    MERGE_INPUTS
+        .out
+        .man
+        .splitCsv(header: true)
+        .set{ch_input_man}
+    
+    MERGE_INPUTS
+        .out
+        .fa
+        .transpose()
+        .map{ taxon, f -> [taxon, file(f).getName(), f] }
+        .join(ch_input_man.map{ taxon, data -> [taxon, data.assembly, data.segment] }, by: [0,1])
+        .map{ taxon, f_name, f, segment -> [taxon, segment, f] }
+        .set{ch_input_fa}
+
+    MERGE_INPUTS
+        .out
+        .meta
+        .transpose()
+        .map{ taxon, f -> [taxon, file(f).getName(), f] }
+        .join(ch_input_man.map{ taxon, data -> [taxon, data.metadata, data.segment] }, by: [0,1])
+        .map{ taxon, f_name, f, segment -> [taxon, segment, f] }
+        .set{ch_input_meta}
+
+    ch_input_fa
+        .join(ch_input_meta, by: [0,1])
+        .combine(ch_input.map{[it.taxon, it.exclusions]}, by: 0)
+        .map{ taxon, segment, assembly, metadata, exclusions -> [taxon: taxon, segment: segment, assembly: assembly ? assembly : [], metadata: metadata ? metadata : [], exclusions: exclusions ? exclusions : []] }
+        .set{ ch_input }
 
     /*
     =============================================================================================================================
@@ -112,7 +178,7 @@ workflow EPITOME {
         CREATE_SUBWF(
             ch_input
         )
-        ch_versions = ch_versions.mix(CREATE_SUBWF.out.versions.first())
+        ch_versions = ch_versions.mix(CREATE_SUBWF.out.versions)
     }
 
 

@@ -8,23 +8,24 @@ process CONSENSUS {
 
     output:
     tuple val(taxon), val(segment), path("${prefix}.fa.gz"), emit: fa
-    path "versions.yml",                                    emit: versions
+    path "versions.yml",                                     emit: versions
 
     when:
     task.ext.when == null || task.ext.when
 
     script:
     prefix = "${taxon.replaceAll(' ','_')}-${segment}-${cluster}"
+    tool = "epitome_consensus.py"
     """
     # run script
-    consensus.sh "${prefix}" ${aln}
-    # compress
-    gzip ${prefix}.fa
-    # collect consensus size info
-    length=\$(zcat ${prefix}.fa.gz | grep -v '>' | tr -d '\n\t ' | wc -c)
-    echo "${prefix},\${length}" > ${prefix}_length.csv
+    ${tool} \\
+        --prefix ${prefix} \\
+        --aln ${aln}
 
-    # something about the normal way of getting version info messes with the creations of .command.env
-    echo -e "\\"${task.process}\\":\\n    consensus.sh: \$(consensus.sh version)" > versions.yml
+    # version info
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        ${tool}: "\$(${tool} --version 2>&1 | tr -d '\\r')"
+    END_VERSIONS
     """
 }

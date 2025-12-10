@@ -1,6 +1,7 @@
 process MAFFT {
     tag "${taxon}-${segment}-${cluster}"
     label 'process_high'
+    stageInMode 'copy'
 
     conda "bioconda::mafft=7.520"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
@@ -21,12 +22,13 @@ process MAFFT {
     def args         = task.ext.args   ?: ''
     prefix = "${taxon.replaceAll(' ','_')}-${segment}-${cluster}"
     """
+    gzip -d ${seqs} || true
     # run mafft
     mafft \\
         ${args} \\
         --thread ${task.cpus} \\
         --auto \\
-        ${seqs} \\
+        *.fa \\
         > ${prefix}.mafft.fa
     
     cat <<-END_VERSIONS > versions.yml
