@@ -13,7 +13,7 @@ import json
 import logging
 import gzip
 import textwrap
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 from epitome_utils import sanitize_filename, read_csv, normalize_keys, logging_config
 
@@ -28,6 +28,7 @@ LOGGER = logging_config()
 # -------------------------------
 
 LEGAL_BASE_RE = re.compile(r"[-ATCGRYSWKMBDHVN]")
+
 
 def load_seqs(fasta: str) -> List[Dict[str, Any]]:
     """Load sequences from FASTA and return list of dicts.
@@ -49,6 +50,30 @@ def load_seqs(fasta: str) -> List[Dict[str, Any]]:
         })
     LOGGER.info(f'Loaded {len(sequences)} sequences from {fasta}')
     return sequences
+
+
+def load_metadata(path: str) -> Dict[str, Dict[str, Any]]:
+    """Load JSONL metadata and return accession -> metadata mapping."""
+    meta: Dict[str, Dict[str, Any]] = {}
+    rows = 0
+    with gzip.open(path, "rt", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            rows += 1
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            if not isinstance(obj, dict):
+                continue
+            acc = obj.get("accession")
+            if not acc:
+                continue
+            meta[str(acc)] = obj
+    LOGGER.info(f"Loaded {len(meta)} metadata rows from {path} (parsed_lines={rows})")
+    return meta
 
 
 def exclude_seqs(sequences: List[Dict[str, Any]], exclusions_path: str) -> List[Dict[str, Any]]:
@@ -105,21 +130,90 @@ def consolidate_seqs(sequences: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return data
 
 
-def filter_seqs(data: List[Dict[str, Any]], amb_thresh: float, len_thresh: float) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """Apply illegal base, ambiguous base (N), and length filters.
+def filter_seqs(
+    data: List[Dict[str, Any]],
+    amb_thresh: float,
+    z_threshold: float,
+    metadata_map: Optional[Dict[str, Dict[str, Any]]] = None
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Apply illegal base, ambiguous base (N), and z-score length filters.
 
     Args:
         data: Consolidated sequence records.
         amb_thresh: Maximum allowed fraction of 'N' bases.
-        len_thresh: Fractional tolerance around median length for pass.
+        z_threshold: Maximum absolute z-score for length (standard deviations from mean).
+        metadata_map: Optional accession -> metadata mapping (JSONL).
 
     Returns:
         (Updated records with QC fields, list of FASTA records that passed).
     """
-    lengths = [d["length"] for d in data]
-    median = statistics.median(lengths) if lengths else 0
-    lower = median * (1 - len_thresh)
-    upper = median * (1 + len_thresh)
+    # Determine which sequences to use for the length statistics calculation.
+    median_lengths: List[int] = []
+    use_refseq_complete = False
+
+    if metadata_map:
+        # Check if *any* accession has both fields; if none do, fall back to all.
+        any_has_fields = False
+        for d in data:
+            for acc in d.get("accessions", []):
+                m = metadata_map.get(acc)
+                if not isinstance(m, dict):
+                    continue
+                if ("complete" in m) and (("source_database" in m) or ("sourceDatabase" in m)):
+                    any_has_fields = True
+                    break
+            if any_has_fields:
+                break
+
+        if any_has_fields:
+            use_refseq_complete = True
+            for d in data:
+                ok = False
+                for acc in d.get("accessions", []):
+                    m = metadata_map.get(acc)
+                    if not isinstance(m, dict):
+                        continue
+                    if "complete" not in m:
+                        continue
+                    src = m.get("source_database")
+                    if src is None:
+                        src = m.get("sourceDatabase")
+                    if (m.get("complete") is True) and (src == "RefSeq"):
+                        ok = True
+                        break
+                if ok:
+                    median_lengths.append(d["length"])
+
+    if not median_lengths:
+        lengths = [d["length"] for d in data]
+    else:
+        lengths = median_lengths
+
+    if len(lengths) >= 2:
+        min_len = min(lengths)
+        max_len = max(lengths)
+        mean_len = statistics.mean(lengths)
+        stdev_len = statistics.stdev(lengths)
+        lower = mean_len - (z_threshold * stdev_len)
+        upper = mean_len + (z_threshold * stdev_len)
+    elif len(lengths) == 1:
+        min_len = max_len = mean_len = lengths[0]
+        stdev_len = 0.0
+        lower = upper = mean_len
+    else:
+        min_len = max_len = mean_len = stdev_len = lower = upper = 0
+
+    if use_refseq_complete and median_lengths:
+        LOGGER.info(
+            f"Lengths (reference set: complete RefSeq only): min={min_len} max={max_len} "
+            f"mean={mean_len:.2f} stdev={stdev_len:.2f} | "
+            f"range=[{lower:.2f}, {upper:.2f}] (±{z_threshold} SD)"
+        )
+    else:
+        LOGGER.info(
+            f"Lengths: min={min_len} max={max_len} mean={mean_len:.2f} stdev={stdev_len:.2f} | "
+            f"range=[{lower:.2f}, {upper:.2f}] (±{z_threshold} SD)"
+        )
 
     def test(flag: bool) -> str:
         return "fail" if flag else "pass"
@@ -131,13 +225,19 @@ def filter_seqs(data: List[Dict[str, Any]], amb_thresh: float, len_thresh: float
         illegal = re.sub(LEGAL_BASE_RE, "", seq)
         amb_ratio = (seq.count("N") / length) if length else 1.0
 
+        # Calculate z-score for this sequence
+        if stdev_len > 0:
+            z_score = (length - mean_len) / stdev_len
+        else:
+            z_score = 0.0
+
         fail_illegal = len(illegal) > 0
         fail_amb = amb_ratio > amb_thresh
-        fail_len = (length < lower) or (length > upper)
+        fail_len = abs(z_score) > z_threshold
 
         d["illegal_bases"] = {"filter": illegal, "value": illegal, "status": test(fail_illegal)}
         d["amb_ratio"] = {"filter": amb_thresh, "value": amb_ratio, "status": test(fail_amb)}
-        d["length"] = {"filter": len_thresh, "value": length, "status": test(fail_len)}
+        d["length"] = {"filter": z_threshold, "value": length, "z_score": z_score, "status": test(fail_len)}
 
         if not (fail_illegal or fail_amb or fail_len):
             passing_fasta_records.append(f">{d['seq_id']}\n{seq}")
@@ -195,14 +295,15 @@ def main() -> None:
     compressed JSONL and FASTA outputs.
 
     """
-    version = "2.0"
+    version = "2.1"
 
     parser = argparse.ArgumentParser(description="QC and deduplication for FASTA sequences")
     parser.add_argument("--fasta", required=True, help="Input FASTA file.")
+    parser.add_argument("--metadata", help="Optional JSONL with per-accession metadata (e.g., complete, source_database).")
     parser.add_argument("--taxon", default='null', help="Taxon name.")
     parser.add_argument("--segment", default='null', help="Segment name.")
     parser.add_argument("--amb_threshold", type=float, default=0.02, help="Max N base ratio.")
-    parser.add_argument("--len_threshold", type=float, default=0.20, help="Length tolerance fraction.")
+    parser.add_argument("--z_threshold", type=float, default=2.58, help="Maximum z-score (standard deviations from mean) for length filtering.")
     parser.add_argument("--exclusions", help="CSV file with accessions to exclude.")
     parser.add_argument("--outdir", default="./", help="Output directory.")
     parser.add_argument("--version", action="version", version=version, help="Show script version and exit.")
@@ -213,12 +314,16 @@ def main() -> None:
 
     os.makedirs(args.outdir, exist_ok=True)
 
+    metadata_map = None
+    if args.metadata:
+        metadata_map = load_metadata(args.metadata)
+
     seqs = load_seqs(args.fasta)
     if args.exclusions:
         seqs = exclude_seqs(seqs, args.exclusions)
 
     consolidated = consolidate_seqs(seqs)
-    qc_results, fasta_pass = filter_seqs(consolidated, args.amb_threshold, args.len_threshold)
+    qc_results, fasta_pass = filter_seqs(consolidated, args.amb_threshold, args.z_threshold, metadata_map=metadata_map)
     save_output(qc_results, fasta_pass, args.taxon, args.segment, args.outdir)
 
     print(f"Raw Count: {len(seqs)}\nFinal Count: {len(fasta_pass)}")

@@ -28,10 +28,10 @@
                     "description": "The output directory where the results will be saved.",
                     "fa_icon": "fas fa-folder-open"
                 },
-                "len_threshold": {
+                "z_threshold": {
                     "type": "number",
-                    "default": 0.2,
-                    "description": "Maximum length difference (+/-) of an input sequence compared to the expected sequence size.",
+                    "default": 2.58,
+                    "description": "Z-score threshold used for identifying sequence outliers by length",
                     "fa_icon": "fas fa-chart-pie"
                 },
                 "amb_threshold": {

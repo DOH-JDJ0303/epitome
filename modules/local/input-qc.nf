@@ -4,7 +4,7 @@ process INPUT_QC {
     stageInMode 'copy'
 
     input:
-    tuple val(taxon), val(segment), path(sequences), path(exclusions)
+    tuple val(taxon), val(segment), path(sequences), path(metadata), path(exclusions)
 
     output:
     tuple val(taxon), val(segment), path("${prefix}.qc.fa.gz"),    emit: seqs, optional: true
@@ -22,9 +22,10 @@ process INPUT_QC {
     ${tool} \\
         --taxon "${taxon}" \\
         --segment "${segment}" \\
+        --z_threshold ${params.z_threshold} \\
         --amb_threshold ${params.amb_threshold} \\
-        --len_threshold ${params.len_threshold} \\
-        --fasta "${sequences}"
+        --fasta "${sequences}" \\
+        ${metadata ? "--metadata ${metadata}" : ''}
 
     # version info
     cat <<-END_VERSIONS > versions.yml

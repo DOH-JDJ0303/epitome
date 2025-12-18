@@ -21,7 +21,7 @@ workflow CREATE_SUBWF {
     =============================================================================================================================
     */
     INPUT_QC(
-        ch_input.map{ [ it.taxon, it.segment, it.assembly, it.exclusions ] }
+        ch_input.map{ [ it.taxon, it.segment, it.assembly, it.metadata, it.exclusions ] }
     )
     ch_versions = ch_versions.mix(INPUT_QC.out.versions.first())
     INPUT_QC.out.seqs.set{ ch_input_qc }

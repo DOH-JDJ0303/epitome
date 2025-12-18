@@ -281,7 +281,10 @@ def main() -> None:
             "host": host,
             "collectionDate": collection_date,
             "geographicRegion": geographic_region,
+            "complete": (rec.get("completeness") == "COMPLETE"),
+            "sourceDatabase": rec.get("sourceDatabase"),
         }
+
 
         sub = (subtypes_map.get(accession) or {})
         rows.append({**base, **sub})
