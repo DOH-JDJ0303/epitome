@@ -1,6 +1,6 @@
 process MERGE_INPUTS {
     tag "${prefix}"
-    label 'process_low'
+    label 'process_high'
     stageInMode 'copy'
 
     input:

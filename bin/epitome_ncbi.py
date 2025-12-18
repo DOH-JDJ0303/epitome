@@ -200,7 +200,7 @@ def main() -> None:
     parser.add_argument("--datasets_genome_fasta", required=True, help="Path to genomic.fna from 'datasets download virus genome taxon'.")
     parser.add_argument("--datasets_genome_json", required=True, help="Path to 'data_report.jsonl' from 'datasets download virus genome taxon'.")
     parser.add_argument("--datasets_taxonomy_json", required=True, help="Path to JSON from 'datasets summary taxonomy taxon'.")
-    parser.add_argument("--edirect_json", required=True, help="Path to JSON or JSONL from EDirect esummary/efetch docsum.")
+    parser.add_argument("--edirect_json",default=None, help="Optional: Path to JSON or JSONL from EDirect esummary/efetch docsum. If omitted, no subtype fields are added.")
     parser.add_argument("--out_dir", default=".", help="Output directory.")
     parser.add_argument("--version", action="version", version=version, help="Show script version and exit.")
     args = parser.parse_args()
@@ -232,18 +232,22 @@ def main() -> None:
         LOGGER.exception(f"Failed to load taxonomy JSON/JSONL: {e}")
         sys.exit(2)
 
-    try:
-        edirect_json_obj = load_json_or_jsonl(args.edirect_json)
-        LOGGER.info(f"Loaded EDirect docsum ({args.edirect_json})")
-    except Exception as e:
-        LOGGER.exception(f"Failed to load EDirect JSON/JSONL: {e}")
-        sys.exit(2)
-
     taxid_name_map = extract_taxids(ds_taxa_json)
     LOGGER.debug(f"taxid->species entries: {len(taxid_name_map)}")
 
-    subtypes_map = parse_edirect_json_docsum(edirect_json_obj)
-    LOGGER.debug(f"subtype entries: {len(subtypes_map)}")
+    subtypes_map: dict[str, dict[str, str]] = {}
+    if args.edirect_json:
+        try:
+            edirect_json_obj = load_json_or_jsonl(args.edirect_json)
+            LOGGER.info("Loaded EDirect docsum (%s)", args.edirect_json)
+        except Exception as e:
+            LOGGER.exception("Failed to load EDirect JSON/JSONL: %s", e)
+            sys.exit(2)
+
+        subtypes_map = parse_edirect_json_docsum(edirect_json_obj)
+        LOGGER.debug("subtype entries: %d", len(subtypes_map))
+    else:
+        LOGGER.info("No --edirect_json provided; proceeding without subtype annotations.")
 
     rows: list[dict] = []
     missing_accession = 0
