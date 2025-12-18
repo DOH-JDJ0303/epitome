@@ -28,7 +28,6 @@ process MERGE_INPUTS {
         ${segmented ? '--segmented' : ''} \\
         ${args}
 
-
     # version info
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
