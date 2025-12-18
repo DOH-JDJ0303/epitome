@@ -31,7 +31,7 @@
                 "z_threshold": {
                     "type": "number",
                     "default": 2.58,
-                    "description": "Z-score threshold used for identifying sequence outliers by length",
+                    "description": "Z-score threshold used for identifying sequence outliers by length.",
                     "fa_icon": "fas fa-chart-pie"
                 },
                 "amb_threshold": {
