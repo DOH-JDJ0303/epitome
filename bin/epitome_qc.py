@@ -148,46 +148,20 @@ def filter_seqs(
         (Updated records with QC fields, list of FASTA records that passed).
     """
     # Determine which sequences to use for the length statistics calculation.
-    median_lengths: List[int] = []
-    use_refseq_complete = False
+    lengths: List[int] = []
 
     if metadata_map:
-        # Check if *any* accession has both fields; if none do, fall back to all.
-        any_has_fields = False
         for d in data:
             for acc in d.get("accessions", []):
                 m = metadata_map.get(acc)
-                if not isinstance(m, dict):
-                    continue
-                if ("complete" in m) and (("source_database" in m) or ("sourceDatabase" in m)):
-                    any_has_fields = True
-                    break
-            if any_has_fields:
-                break
+                if isinstance(m, dict) and m.get("canonical") is True:
+                    lengths.append(d["length"])
 
-        if any_has_fields:
-            use_refseq_complete = True
-            for d in data:
-                ok = False
-                for acc in d.get("accessions", []):
-                    m = metadata_map.get(acc)
-                    if not isinstance(m, dict):
-                        continue
-                    if "complete" not in m:
-                        continue
-                    src = m.get("source_database")
-                    if src is None:
-                        src = m.get("sourceDatabase")
-                    if (m.get("complete") is True) and (src == "RefSeq"):
-                        ok = True
-                        break
-                if ok:
-                    median_lengths.append(d["length"])
-
-    if not median_lengths:
+    if not lengths:
+        LOGGER.info("Using all sequences for length filtering (No canonical sequences supplied)")
         lengths = [d["length"] for d in data]
     else:
-        lengths = median_lengths
+        LOGGER.info(f"Using canonical sequences for length filtering (n={len(lengths)})")
 
     if len(lengths) >= 2:
         min_len = min(lengths)
@@ -203,17 +177,10 @@ def filter_seqs(
     else:
         min_len = max_len = mean_len = stdev_len = lower = upper = 0
 
-    if use_refseq_complete and median_lengths:
-        LOGGER.info(
-            f"Lengths (reference set: complete RefSeq only): min={min_len} max={max_len} "
-            f"mean={mean_len:.2f} stdev={stdev_len:.2f} | "
-            f"range=[{lower:.2f}, {upper:.2f}] (±{z_threshold} SD)"
-        )
-    else:
-        LOGGER.info(
-            f"Lengths: min={min_len} max={max_len} mean={mean_len:.2f} stdev={stdev_len:.2f} | "
-            f"range=[{lower:.2f}, {upper:.2f}] (±{z_threshold} SD)"
-        )
+    LOGGER.info(
+        f"Lengths: min={min_len} max={max_len} mean={mean_len:.2f} stdev={stdev_len:.2f} | "
+        f"range=[{lower:.2f}, {upper:.2f}] (±{z_threshold} SD)"
+    )
 
     def test(flag: bool) -> str:
         return "fail" if flag else "pass"
@@ -299,7 +266,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="QC and deduplication for FASTA sequences")
     parser.add_argument("--fasta", required=True, help="Input FASTA file.")
-    parser.add_argument("--metadata", help="Optional JSONL with per-accession metadata (e.g., complete, source_database).")
+    parser.add_argument("--metadata", help="Optional JSONL with canonical sequence metadata")
     parser.add_argument("--taxon", default='null', help="Taxon name.")
     parser.add_argument("--segment", default='null', help="Segment name.")
     parser.add_argument("--amb_threshold", type=float, default=0.02, help="Max N base ratio.")

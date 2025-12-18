@@ -456,20 +456,25 @@ def group_segments(
     return final
 
 
-def load_fastas(files):
+def load_fastas(files, min_length):
     fasta = {}
     n_files = 0
     n_seqs = 0
+    skipped = 0
     for f in files:
         n_files += 1
-        LOGGER.info("Loading FASTA: %s", f)
+        LOGGER.info(f"Loading FASTA: {f}")
         for rec in screed.open(f):
             name = rec.name.split()[0]
             if name in fasta:
                 raise ValueError(f"Multiple sequences supplied for {name}")
-            fasta[name] = rec.sequence
+            seq = rec.sequence
+            if len(seq) < min_length:
+                skipped += 1
+                continue
+            fasta[name] = seq
             n_seqs += 1
-    LOGGER.info("Loaded %d sequences from %d FASTA files", n_seqs, n_files)
+    LOGGER.info(f"Loaded {n_seqs} sequences from {n_files} FASTA files (skipped {skipped})")
     return fasta
 
 def write_group_files(group: str, records: List[Dict[str, Any]], taxon: str, outdir: str) -> Tuple[str, str]:
@@ -544,6 +549,7 @@ def main() -> None:
     parser.add_argument("--assembly", nargs="+", help="Assembly FASTA(s).")
     parser.add_argument("--metadata", nargs="+", help="Metadata file(s).")
     parser.add_argument("--segmented", action="store_true", help="Cluster/merge by segment labels using MinHash/DBSCAN.")
+    parser.add_argument("--min-length",default=800, help="Minimum sequence length to be included.")
     parser.add_argument("--singletons", action="store_true", help="Keep singletons")
     parser.add_argument("--scaled", type=int, default=10, help="MinHash scaled factor.")
     parser.add_argument("--ksize", type=int, default=16, help="MinHash k-mer size.")
@@ -570,7 +576,7 @@ def main() -> None:
             LOGGER.exception(f"Error reading {p}: {e}")
             sys.exit(2)
 
-    fastas = load_fastas(args.assembly)
+    fastas = load_fastas(args.assembly, args.min_length)
 
     # Merge and write
     merged = merge_records(metadata, fastas)
