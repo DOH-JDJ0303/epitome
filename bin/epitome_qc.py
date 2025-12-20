@@ -30,52 +30,6 @@ LOGGER = logging_config()
 LEGAL_BASE_RE = re.compile(r"[-ATCGRYSWKMBDHVN]")
 
 
-def load_seqs(fasta: str) -> List[Dict[str, Any]]:
-    """Load sequences from FASTA and return list of dicts.
-
-    Args:
-        fasta: Path to input FASTA file.
-
-    Returns:
-        List of records, each with keys: accession (str), length (int), sequence (str).
-    """
-    sequences: List[Dict[str, Any]] = []
-    for record in screed.open(fasta):
-        accession = record.name.split()[0]
-        seq = record.sequence.upper()
-        sequences.append({
-            "accession": accession,
-            "length": len(seq),
-            "sequence": seq
-        })
-    LOGGER.info(f'Loaded {len(sequences)} sequences from {fasta}')
-    return sequences
-
-
-def load_metadata(path: str) -> Dict[str, Dict[str, Any]]:
-    """Load JSONL metadata and return accession -> metadata mapping."""
-    meta: Dict[str, Dict[str, Any]] = {}
-    rows = 0
-    with gzip.open(path, "rt", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            rows += 1
-            try:
-                obj = json.loads(line)
-            except Exception:
-                continue
-            if not isinstance(obj, dict):
-                continue
-            acc = obj.get("accession")
-            if not acc:
-                continue
-            meta[str(acc)] = obj
-    LOGGER.info(f"Loaded {len(meta)} metadata rows from {path} (parsed_lines={rows})")
-    return meta
-
-
 def exclude_seqs(sequences: List[Dict[str, Any]], exclusions_path: str) -> List[Dict[str, Any]]:
     """Exclude sequences by accession from a CSV file.
 
@@ -249,6 +203,37 @@ def save_output(json_data: List[Dict[str, Any]], fasta_data: List[str], taxon: s
     else:
         LOGGER.info(f"All sequences failed QC. Nothing to save.")
 
+def load_input(filepath):
+    LOGGER.info(f"Loading file: {filepath}")
+    metadata: Dict[str, Dict[str, Any]] = {}
+    seqs: list = []
+    count = 0
+    taxon_segment = set()
+
+    with gzip.open(filepath, "rt", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            entry = json.loads(line)
+            if isinstance(entry, dict) and 'accession' in entry:
+                metadata[str(entry['accession'])] = {k: v for k, v in entry.items() if k not in ['accession', 'sequence']}
+                seqs.append(
+                    {'sequence': entry['sequence'], 
+                    'length': len(entry['sequence']), 
+                    'accession': entry['accession']
+                    })
+                count += 1
+                taxon_segment.add((entry['taxon'], entry['segment']))
+    
+    if len(taxon_segment) > 1:
+        raise ValueError("Multiple taxon / segment values in input!")
+    else:
+        taxon_segment = list(taxon_segment)[0]
+
+    LOGGER.info(f"Loaded {count} records from {filepath}")
+    return metadata, seqs, taxon_segment
+
 
 # -------------------------------
 #  MAIN
@@ -265,10 +250,7 @@ def main() -> None:
     version = "2.1"
 
     parser = argparse.ArgumentParser(description="QC and deduplication for FASTA sequences")
-    parser.add_argument("--fasta", required=True, help="Input FASTA file.")
-    parser.add_argument("--metadata", help="Optional JSONL with canonical sequence metadata")
-    parser.add_argument("--taxon", default='null', help="Taxon name.")
-    parser.add_argument("--segment", default='null', help="Segment name.")
+    parser.add_argument("input", help="Optional JSONL with canonical sequence metadata")
     parser.add_argument("--amb_threshold", type=float, default=0.02, help="Max N base ratio.")
     parser.add_argument("--z_threshold", type=float, default=2.58, help="Maximum z-score (standard deviations from mean) for length filtering.")
     parser.add_argument("--exclusions", help="CSV file with accessions to exclude.")
@@ -281,17 +263,14 @@ def main() -> None:
 
     os.makedirs(args.outdir, exist_ok=True)
 
-    metadata_map = None
-    if args.metadata:
-        metadata_map = load_metadata(args.metadata)
+    metadata_map, seqs, (taxon, segment) = load_input(args.input)
 
-    seqs = load_seqs(args.fasta)
     if args.exclusions:
         seqs = exclude_seqs(seqs, args.exclusions)
 
     consolidated = consolidate_seqs(seqs)
     qc_results, fasta_pass = filter_seqs(consolidated, args.amb_threshold, args.z_threshold, metadata_map=metadata_map)
-    save_output(qc_results, fasta_pass, args.taxon, args.segment, args.outdir)
+    save_output(qc_results, fasta_pass, taxon, segment, args.outdir)
 
     print(f"Raw Count: {len(seqs)}\nFinal Count: {len(fasta_pass)}")
 

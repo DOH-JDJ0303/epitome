@@ -23,7 +23,8 @@ process SUMMARY {
         --method ${method} \\
         --qc ${qc_json} \\
         --clusters ${clusters_json} \\
-        --meta ${meta_csv}
+        --meta ${meta_csv} \\
+        --z_threshold ${params.z_threshold}
 
     # version info
     cat <<-END_VERSIONS > versions.yml

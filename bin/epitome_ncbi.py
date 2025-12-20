@@ -201,7 +201,7 @@ def main() -> None:
     parser.add_argument("--datasets_genome_json", required=True, help="Path to 'data_report.jsonl' from 'datasets download virus genome taxon'.")
     parser.add_argument("--datasets_taxonomy_json", required=True, help="Path to JSON from 'datasets summary taxonomy taxon'.")
     parser.add_argument("--edirect_json",default=None, help="Optional: Path to JSON or JSONL from EDirect esummary/efetch docsum. If omitted, no subtype fields are added.")
-    parser.add_argument("--min-length",default=800, help="Minimum sequence length to be included.")
+    parser.add_argument("--min-length",default=800, type=int, help="Minimum sequence length to be included.")
     parser.add_argument("--out_dir", default=".", help="Output directory.")
     parser.add_argument("--version", action="version", version=version, help="Show script version and exit.")
     args = parser.parse_args()
@@ -262,7 +262,7 @@ def main() -> None:
             continue
 
         length = rec.get('length')
-        if not length or length < args.min_length:
+        if not length or int(length) < int(args.min_length):
             short_sequences += 1
             continue
 

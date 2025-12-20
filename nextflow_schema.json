@@ -50,6 +50,12 @@
                     "fa_icon": "fas fa-spinner",
                     "description": "Include only complete sequences from NCBI. Completeness is based on what the submitter says. Not reliable."
                 },
+                "min_length": {
+                    "type": "integer",
+                    "default": 800,
+                    "fa_icon": "fas fa-ruler-horizontal",
+                    "description": "Minimum sequence length filter applied to NCBI downloads"
+                },
                 "email": {
                     "type": "string",
                     "description": "Email address for completion summary.",

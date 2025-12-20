@@ -9,6 +9,7 @@ import json
 import gzip
 import logging
 import statistics
+import math
 from collections import defaultdict
 from typing import Any, Dict, Iterable, List, Mapping
 from datetime import datetime
@@ -26,6 +27,66 @@ timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 # -------------------------------
 #  FUNCTIONS
 # -------------------------------
+
+def mark_length_outliers(
+    data: List[Dict[str, Any]],
+    z_thresh: float = 2.58,
+) -> None:
+    """
+    Mark length outliers in-place using a z-score threshold.
+
+    An outlier is defined as abs(zscore) >= z_thresh.
+    Adds/overwrites boolean field: `outlier`.
+    """
+    lengths = [len(r["sequence"]) for r in data if r.get("sequence")]
+
+    # Default: no outliers if insufficient data
+    if len(lengths) < 2:
+        for r in data:
+            r["outlier"] = False
+        LOGGER.info(
+            f"Outlier eval: <2 valid lengths; marked all outlier=False"
+        )
+        return
+
+    mean_len = statistics.mean(lengths)
+    stdev_len = statistics.pstdev(lengths)  # population stdev
+
+    if stdev_len == 0 or math.isnan(stdev_len):
+        for r in data:
+            r["outlier"] = False
+        LOGGER.info(
+            f"Outlier eval: stdev=0 (mean={mean_len:.2f}); marked all outlier=False"
+        )
+        return
+
+    lower = mean_len - (z_thresh * stdev_len)
+    upper = mean_len + (z_thresh * stdev_len)
+
+    n_out = 0
+    for r in data:
+        seq = r.get("sequence")
+        if not seq:
+            LOGGER.warning("Missing sequence; marking as outlier")
+            r["outlier"] = True
+            n_out += 1
+            continue
+
+        length = len(seq)
+        z = (length - mean_len) / stdev_len
+        is_out = abs(z) >= z_thresh
+        r["outlier"] = bool(is_out)
+
+        if is_out:
+            n_out += 1
+
+    LOGGER.info(
+        f"Length outlier eval: "
+        f"min={min(lengths)} max={max(lengths)} "
+        f"mean={mean_len:.2f} stdev={stdev_len:.2f} "
+        f"cutoff=[{lower:.2f}, {upper:.2f}] (±{z_thresh} SD) "
+        f"-> {n_out}/{len(data)} outliers"
+    )
 
 def summarize_metadata(metadata: Mapping[str, Iterable[Any]]) -> Dict[str, Any]:
     """Summarize a mapping of metadata key -> iterable of values.
@@ -131,6 +192,7 @@ def main() -> None:
     parser.add_argument("--taxon", required=True, help="Taxon name.")
     parser.add_argument("--segment", required=True, help="Segment name.")
     parser.add_argument("--method", required=True, help="Reference creation method (e.g. centroid, consensus).")
+    parser.add_argument("--z_threshold", type=float, default=2.58, help="Maximum z-score (standard deviations from mean) for length filtering.")
     parser.add_argument("--outdir", default='.', help="Output directory.")
     parser.add_argument("--version", action="version", version=version, help="Show script version and exit.")
     args = parser.parse_args()
@@ -183,6 +245,9 @@ def main() -> None:
         }
 
         summary_list.append(summary_row)
+
+    # Mark length outliers (in-place)
+    mark_length_outliers(summary_list, z_thresh=args.z_threshold)
 
     save_output(summary_list, args.taxon, args.segment, args.method, args.outdir)
 

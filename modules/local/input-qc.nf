@@ -4,7 +4,7 @@ process INPUT_QC {
     stageInMode 'copy'
 
     input:
-    tuple val(taxon), val(segment), path(sequences), path(metadata), path(exclusions)
+    tuple val(taxon), val(segment), path(jsonl), path(exclusions)
 
     output:
     tuple val(taxon), val(segment), path("${prefix}.qc.fa.gz"),    emit: seqs, optional: true
@@ -20,12 +20,10 @@ process INPUT_QC {
     tool = "epitome_qc.py"
     """
     ${tool} \\
-        --taxon "${taxon}" \\
-        --segment "${segment}" \\
         --z_threshold ${params.z_threshold} \\
         --amb_threshold ${params.amb_threshold} \\
-        --fasta "${sequences}" \\
-        ${metadata ? "--metadata ${metadata}" : ''}
+        ${exclusions ? "--exclusions ${exclusions}" : ''} \\
+        ${jsonl}
 
     # version info
     cat <<-END_VERSIONS > versions.yml
