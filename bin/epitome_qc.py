@@ -224,12 +224,13 @@ def load_input(filepath):
                     'accession': entry['accession']
                     })
                 count += 1
-                taxon_segment.add((entry['taxon'], entry['segment']))
+                if entry.get('taxon') and entry.get('segment'):
+                    taxon_segment.add((entry['taxon'], entry['segment']))
     
-    if len(taxon_segment) > 1:
-        raise ValueError("Multiple taxon / segment values in input!")
-    else:
+    if len(taxon_segment) == 1:
         taxon_segment = list(taxon_segment)[0]
+    else:
+        raise ValueError("One taxon / segment required")
 
     LOGGER.info(f"Loaded {count} records from {filepath}")
     return metadata, seqs, taxon_segment
