@@ -44,7 +44,7 @@ def exclude_seqs(sequences: List[Dict[str, Any]], exclusions_path: str) -> List[
 
     rows = read_csv(exclusions_path)
     # Be tolerant of header case
-    rows = [normalize_keys(r, lower_keys=True) for r in rows]
+    rows = [normalize_keys(r) for r in rows]
     excluded = {r["accession"] for r in rows if "accession" in r and r["accession"]}
 
     if not excluded:
