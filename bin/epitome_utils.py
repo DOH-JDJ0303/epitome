@@ -12,6 +12,8 @@ import re
 import sys
 from datetime import datetime
 from typing import Any, Dict, List, Mapping, Tuple
+import statistics
+import matplotlib.pyplot as plt
 
 import numpy as np
 import screed
@@ -321,3 +323,61 @@ def load_fastas(files: List[str]) -> Dict[str, str]:
             n_seqs += 1
 
     return fasta
+
+# ---------------------------------------------------------------------
+# Statistics
+# ---------------------------------------------------------------------
+
+# Modified Z-Score (Median + MAD)
+def modified_zscore(data, z_threshold):
+    if len(data) >= 2:
+        med_len = statistics.median(data)
+        abs_devs = [abs(x - med_len) for x in data]
+        mad = statistics.median(abs_devs)
+        mad_sigma = 1.4826 * mad
+
+        if mad_sigma > 0:
+            lower = med_len - (z_threshold * mad_sigma)
+            upper = med_len + (z_threshold * mad_sigma)
+        else:
+            lower = upper = med_len
+
+    elif len(data) == 1:
+        med_len = data[0]
+        mad = mad_sigma = 0.0
+        lower = upper = med_len
+    else:
+        med_len = mad = mad_sigma = lower = upper = 0
+
+    return med_len, mad, mad_sigma, lower, upper
+
+def plot_distribution(values, outfile, bins=50, title=None, cutoffs=None):
+    """
+    Plot a histogram with lower, median, and upper vertical lines.
+
+    Args:
+        values (list or array-like): Numeric values to plot
+        outfile (str): Path to output image
+        bins (int): Number of histogram bins
+        title (str, optional): Plot title
+    """
+    values = np.asarray(values)
+
+    if cutoffs:
+        lower, median, upper = cutoffs
+
+    plt.figure()
+    plt.hist(values, bins=bins)
+    plt.axvline(lower, color="red", linestyle="--", label=f"Lower: {lower:.2f}")
+    plt.axvline(median, color="black", linestyle="-",  label=f"Median: {median:.2f}")
+    plt.axvline(upper, color="red", linestyle="--", label=f"Upper: {upper:.2f}")
+
+    if title:
+        plt.title(title)
+
+    plt.xlabel("Value")
+    plt.ylabel("Count")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(outfile)
+    plt.close()

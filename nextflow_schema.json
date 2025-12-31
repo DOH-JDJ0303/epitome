@@ -30,8 +30,14 @@
                 },
                 "z_threshold": {
                     "type": "number",
-                    "default": 2.58,
-                    "description": "Z-score threshold used for identifying sequence outliers by length.",
+                    "default": 3,
+                    "description": "Modified Z-score threshold used for identifying sequence outliers by length.",
+                    "fa_icon": "fas fa-chart-pie"
+                },
+                "min_canonical": {
+                    "type": "integer",
+                    "default": 10,
+                    "description": "Minimum number of canonical sequences required for estimating z-score of input sequences",
                     "fa_icon": "fas fa-chart-pie"
                 },
                 "amb_threshold": {

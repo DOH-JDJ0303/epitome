@@ -14,7 +14,7 @@ from collections import defaultdict
 from typing import Any, Dict, Iterable, List, Mapping
 from datetime import datetime
 
-from epitome_utils import sanitize_filename, load_jsonl_gz_by_key, logging_config
+from epitome_utils import sanitize_filename, load_jsonl_gz_by_key, logging_config, modified_zscore, plot_distribution
 
 # -------------------------------
 #  GLOBAL CONFIG
@@ -30,63 +30,51 @@ timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 
 def mark_length_outliers(
     data: List[Dict[str, Any]],
-    z_thresh: float = 2.58,
+    z_threshold: float = 2.58,
+    min_count: int = 10,
+    plot_file: str = "length_distribution.jpg"
 ) -> None:
-    """
-    Mark length outliers in-place using a z-score threshold.
 
-    An outlier is defined as abs(zscore) >= z_thresh.
-    Adds/overwrites boolean field: `outlier`.
-    """
     lengths = [len(r["sequence"]) for r in data if r.get("sequence")]
 
     # Default: no outliers if insufficient data
-    if len(lengths) < 2:
+    if len(lengths) < min_count:
         for r in data:
             r["outlier"] = False
         LOGGER.info(
-            f"Outlier eval: <2 valid lengths; marked all outlier=False"
+            f"Outlier eval: <{min_count} valid lengths; marked all outlier=False"
         )
         return
 
-    mean_len = statistics.mean(lengths)
-    stdev_len = statistics.pstdev(lengths)  # population stdev
+    med_len, mad, mad_sigma, lower, upper = modified_zscore(lengths, z_threshold)
 
-    if stdev_len == 0 or math.isnan(stdev_len):
-        for r in data:
-            r["outlier"] = False
-        LOGGER.info(
-            f"Outlier eval: stdev=0 (mean={mean_len:.2f}); marked all outlier=False"
-        )
-        return
+    LOGGER.info(
+        f"Lengths: min={min(lengths) if lengths else 0} max={max(lengths) if lengths else 0} "
+        f"median={med_len:.2f} MAD={mad:.2f} (sigma~{mad_sigma:.2f}) | "
+        f"range=[{lower:.2f}, {upper:.2f}] (threshold={z_threshold})"
+    )
 
-    lower = mean_len - (z_thresh * stdev_len)
-    upper = mean_len + (z_thresh * stdev_len)
+    # Plot distribution, if possible
+    try:
+        plot_distribution(lengths, plot_file, cutoffs=(lower, med_len, upper))
+    except:
+        LOGGER.warning("Distribution plot not created.")
 
     n_out = 0
     for r in data:
-        seq = r.get("sequence")
-        if not seq:
-            LOGGER.warning("Missing sequence; marking as outlier")
-            r["outlier"] = True
-            n_out += 1
-            continue
+        seq = r["sequence"]
 
         length = len(seq)
-        z = (length - mean_len) / stdev_len
-        is_out = abs(z) >= z_thresh
+        robust_z = (length - med_len) / mad_sigma if mad_sigma > 0 else 0.0
+        is_out = abs(robust_z) >= z_threshold
         r["outlier"] = bool(is_out)
 
         if is_out:
             n_out += 1
 
-    LOGGER.info(
-        f"Length outlier eval: "
-        f"min={min(lengths)} max={max(lengths)} "
-        f"mean={mean_len:.2f} stdev={stdev_len:.2f} "
-        f"cutoff=[{lower:.2f}, {upper:.2f}] (±{z_thresh} SD) "
-        f"-> {n_out}/{len(data)} outliers"
-    )
+    LOGGER.info(f"Outlier eval: {n_out}/{len(data)} have unusual length; marked as outlier=True")
+
+    
 
 def summarize_metadata(metadata: Mapping[str, Iterable[Any]]) -> Dict[str, Any]:
     """Summarize a mapping of metadata key -> iterable of values.
@@ -103,13 +91,15 @@ def summarize_metadata(metadata: Mapping[str, Iterable[Any]]) -> Dict[str, Any]:
         Dictionary mapping field name to summary object.
     """
 
-    def summarize_value_list(values_in: Iterable[Any]) -> Any:
+    def summarize_value_list(key, values_in: Iterable[Any]) -> Any:
+        numeric_exceptions = ['tax_id', 'canonical']
+
         values = [v for v in values_in if v not in (None, "")]
         if not values:
             return None
 
         # Numeric float summary
-        if all(isinstance(v, float) for v in values):
+        if all(isinstance(v, float) for v in values) and key not in numeric_exceptions:
             return {
                 "min": min(values),
                 "max": max(values),
@@ -118,7 +108,7 @@ def summarize_metadata(metadata: Mapping[str, Iterable[Any]]) -> Dict[str, Any]:
             }
 
         # Integer summary
-        if all(isinstance(v, int) for v in values):
+        if all(isinstance(v, int) for v in values) and key not in numeric_exceptions:
             return {
                 "min": min(values),
                 "max": max(values),
@@ -137,7 +127,7 @@ def summarize_metadata(metadata: Mapping[str, Iterable[Any]]) -> Dict[str, Any]:
     return {
         k: summary
         for k, vs in metadata.items()
-        if (summary := summarize_value_list(vs)) is not None
+        if (summary := summarize_value_list(k, vs)) is not None
     }
 
 
@@ -229,6 +219,8 @@ def main() -> None:
             fields = meta_data.get(aid)
             if fields:
                 for k, v in fields.items():
+                    if k in ['sequence', 'taxon', 'segment']:
+                        continue
                     per_field_values[k].append(v)
 
         metadata_summary = summarize_metadata(per_field_values)
@@ -247,7 +239,7 @@ def main() -> None:
         summary_list.append(summary_row)
 
     # Mark length outliers (in-place)
-    mark_length_outliers(summary_list, z_thresh=args.z_threshold)
+    mark_length_outliers(summary_list, z_threshold=args.z_threshold, plot_file=os.path.join(args.outdir, f"{args.taxon}-{args.segment}.len_dist_final.jpg"))
 
     save_output(summary_list, args.taxon, args.segment, args.method, args.outdir)
 

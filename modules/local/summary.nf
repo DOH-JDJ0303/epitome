@@ -7,6 +7,7 @@ process SUMMARY {
 
     output:
     tuple val(taxon), val(segment), path("${prefix}.jsonl.gz"),   emit: json
+    tuple val(taxon), val(segment), path("*.jpg"),                emit: plot, optional: true
     path "versions.yml",                                          emit: versions
 
     when:

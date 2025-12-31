@@ -9,6 +9,7 @@ process INPUT_QC {
     output:
     tuple val(taxon), val(segment), path("${prefix}.qc.fa.gz"),    emit: seqs, optional: true
     tuple val(taxon), val(segment), path("${prefix}.qc.jsonl.gz"), emit: summary
+    tuple val(taxon), val(segment), path("*.jpg"),                 emit: plot, optional: true
     path "versions.yml",                                           emit: versions
 
 
@@ -21,6 +22,7 @@ process INPUT_QC {
     """
     ${tool} \\
         --z_threshold ${params.z_threshold} \\
+        --min_canonical ${params.min_canonical} \\
         --amb_threshold ${params.amb_threshold} \\
         ${exclusions ? "--exclusions ${exclusions}" : ''} \\
         ${jsonl}

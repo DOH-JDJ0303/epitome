@@ -15,7 +15,7 @@ import gzip
 import textwrap
 from typing import List, Dict, Any, Tuple, Optional
 
-from epitome_utils import sanitize_filename, read_csv, normalize_keys, logging_config
+from epitome_utils import sanitize_filename, read_csv, normalize_keys, logging_config, modified_zscore, plot_distribution
 
 # -------------------------------
 #  GLOBAL CONFIG
@@ -83,89 +83,156 @@ def consolidate_seqs(sequences: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     LOGGER.info(f'Consolidated {initial_count} to {len(data)} unique sequences')
     return data
 
-
 def filter_seqs(
     data: List[Dict[str, Any]],
     amb_thresh: float,
     z_threshold: float,
-    metadata_map: Optional[Dict[str, Dict[str, Any]]] = None
+    min_canonical: int,
+    metadata_map: Optional[Dict[str, Dict[str, Any]]] = None,
+    n_edge_len_fails: int = 5,
+    plot_file: str = 'length_distribution.jpg'
 ) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """Apply illegal base, ambiguous base (N), and z-score length filters.
+    """Apply illegal base, ambiguous base (N), and robust MAD z-score length filters.
 
-    Args:
-        data: Consolidated sequence records.
-        amb_thresh: Maximum allowed fraction of 'N' bases.
-        z_threshold: Maximum absolute z-score for length (standard deviations from mean).
-        metadata_map: Optional accession -> metadata mapping (JSONL).
+    Length filtering uses:
+        robust_z = (length - median_len) / (1.4826 * MAD)
+    Flags sequences on both tails:
+        abs(robust_z) > z_threshold
+
+    Also logs a small "edge" report of the length failures that were closest
+    to the cutoff.
 
     Returns:
         (Updated records with QC fields, list of FASTA records that passed).
     """
     # Determine which sequences to use for the length statistics calculation.
     lengths: List[int] = []
+    lengths_select: List = []
 
     if metadata_map:
         for d in data:
             for acc in d.get("accessions", []):
+                lengths.append(d["length"])
                 m = metadata_map.get(acc)
                 if isinstance(m, dict) and m.get("canonical") is True:
-                    lengths.append(d["length"])
+                    lengths_select.append(d["length"])
 
-    if not lengths:
-        LOGGER.info("Using all sequences for length filtering (No canonical sequences supplied)")
-        lengths = [d["length"] for d in data]
+    if not lengths or len(lengths) < min_canonical:
+        LOGGER.info("Using all sequences for length filtering (Too few canonical sequences supplied)")
+        lengths_select = lengths
     else:
-        LOGGER.info(f"Using canonical sequences for length filtering (n={len(lengths)})")
+        LOGGER.info(f"Using canonical sequences for length filtering (n={len(lengths_select)})")
 
-    if len(lengths) >= 2:
-        min_len = min(lengths)
-        max_len = max(lengths)
-        mean_len = statistics.mean(lengths)
-        stdev_len = statistics.stdev(lengths)
-        lower = mean_len - (z_threshold * stdev_len)
-        upper = mean_len + (z_threshold * stdev_len)
-    elif len(lengths) == 1:
-        min_len = max_len = mean_len = lengths[0]
-        stdev_len = 0.0
-        lower = upper = mean_len
-    else:
-        min_len = max_len = mean_len = stdev_len = lower = upper = 0
+    med_len, mad, mad_sigma, lower, upper = modified_zscore(lengths_select, z_threshold)
 
     LOGGER.info(
-        f"Lengths: min={min_len} max={max_len} mean={mean_len:.2f} stdev={stdev_len:.2f} | "
-        f"range=[{lower:.2f}, {upper:.2f}] (±{z_threshold} SD)"
+        f"Lengths: min={min(lengths_select) if lengths_select else 0} max={max(lengths_select) if lengths_select else 0} "
+        f"median={med_len:.2f} MAD={mad:.2f} (sigma~{mad_sigma:.2f}) | "
+        f"range=[{lower:.2f}, {upper:.2f}] (threshold={z_threshold})"
     )
 
-    def test(flag: bool) -> str:
-        return "fail" if flag else "pass"
+    # Plot distribution, if possible
+    try:
+        plot_distribution(lengths, plot_file, cutoffs=(lower, med_len, upper))
+    except:
+        LOGGER.warning("Distribution plot not created.")
 
     passing_fasta_records: List[str] = []
+
+    # Summary counters
+    n_total = len(data)
+    n_pass = 0
+    n_fail_any = 0
+    n_fail_illegal = 0
+    n_fail_amb = 0
+    n_fail_len = 0
+    n_fail_multiple = 0
+
+    # Track "edge" length failures: those closest to the cutoff but still failing
+    edge_len_fails = []
+
     for d in data:
         seq = d["sequence"]
         length = d["length"]
+
         illegal = re.sub(LEGAL_BASE_RE, "", seq)
         amb_ratio = (seq.count("N") / length) if length else 1.0
-
-        # Calculate z-score for this sequence
-        if stdev_len > 0:
-            z_score = (length - mean_len) / stdev_len
-        else:
-            z_score = 0.0
+        robust_z = (length - med_len) / mad_sigma if mad_sigma > 0 else 0.0
 
         fail_illegal = len(illegal) > 0
         fail_amb = amb_ratio > amb_thresh
-        fail_len = abs(z_score) > z_threshold
+        fail_len = abs(robust_z) > z_threshold
 
-        d["illegal_bases"] = {"filter": illegal, "value": illegal, "status": test(fail_illegal)}
-        d["amb_ratio"] = {"filter": amb_thresh, "value": amb_ratio, "status": test(fail_amb)}
-        d["length"] = {"filter": z_threshold, "value": length, "z_score": z_score, "status": test(fail_len)}
+        # QC fields (unchanged keys)
+        d["illegal_bases"] = {
+            "filter": illegal,
+            "value": illegal,
+            "status": "fail" if fail_illegal else "pass",
+        }
+        d["amb_ratio"] = {
+            "filter": amb_thresh,
+            "value": amb_ratio,
+            "status": "fail" if fail_amb else "pass",
+        }
+        d["length_z_score"] = {
+            "filter": z_threshold,
+            "value": robust_z,
+            "length": length,
+            "status": "fail" if fail_len else "pass",
+        }
 
-        if not (fail_illegal or fail_amb or fail_len):
+        # Edge tracking for length failures (closest to cutoff)
+        if fail_len:
+            abs_over = abs(abs(robust_z) - z_threshold)  # small => barely failed
+            edge_len_fails.append((abs_over, length, d["accessions"]))
+
+
+        fail_reasons = int(fail_illegal) + int(fail_amb) + int(fail_len)
+
+        if fail_reasons == 0:
+            n_pass += 1
             passing_fasta_records.append(f">{d['seq_id']}\n{seq}")
+        else:
+            n_fail_any += 1
+            if fail_reasons > 1:
+                n_fail_multiple += 1
+            if fail_illegal:
+                n_fail_illegal += 1
+            if fail_amb:
+                n_fail_amb += 1
+            if fail_len:
+                n_fail_len += 1
 
-    LOGGER.info(f'{len(passing_fasta_records)} sequences passed all filters')
+    # Summary
+    LOGGER.info(
+        f"Filter summary: total={n_total} pass={n_pass} fail_any={n_fail_any} | "
+        f"fail_illegal={n_fail_illegal} fail_amb={n_fail_amb} fail_len={n_fail_len} "
+        f"(multi_reason_fail={n_fail_multiple})"
+    )
+
+    if n_total > 0:
+        LOGGER.info(
+            f"Fail rates: any={n_fail_any / n_total:.3%} illegal={n_fail_illegal / n_total:.3%} "
+            f"amb={n_fail_amb / n_total:.3%} len={n_fail_len / n_total:.3%} "
+            f"multi_reason={n_fail_multiple / n_total:.3%}"
+        )
+
+        if edge_len_fails and n_edge_len_fails > 0:
+            edge_len_fails.sort(key=lambda t: t[0])
+            edge_len_fails = edge_len_fails[:n_edge_len_fails]
+
+            lines = [f"{acc}:{length}" for _, length, acc in edge_len_fails]
+
+            LOGGER.info(
+                f"Edge length fails (closest {len(lines)} of {n_fail_len} length fails): "
+                + ", ".join(lines)
+            )
+        else:
+            LOGGER.info("Edge length fails: none")
+
+
+    LOGGER.info(f"{len(passing_fasta_records)} sequences passed all filters")
     return data, passing_fasta_records
-
 
 def save_output(json_data: List[Dict[str, Any]], fasta_data: List[str], taxon: str, segment: str, outdir: str) -> None:
     """Save JSONL and FASTA outputs to compressed files.
@@ -254,6 +321,7 @@ def main() -> None:
     parser.add_argument("input", help="Optional JSONL with canonical sequence metadata")
     parser.add_argument("--amb_threshold", type=float, default=0.02, help="Max N base ratio.")
     parser.add_argument("--z_threshold", type=float, default=2.58, help="Maximum z-score (standard deviations from mean) for length filtering.")
+    parser.add_argument("--min_canonical", type=int, default=10, help="Minimum number of canonical samples required for calculating the z-score range.")
     parser.add_argument("--exclusions", help="CSV file with accessions to exclude.")
     parser.add_argument("--outdir", default="./", help="Output directory.")
     parser.add_argument("--version", action="version", version=version, help="Show script version and exit.")
@@ -270,7 +338,7 @@ def main() -> None:
         seqs = exclude_seqs(seqs, args.exclusions)
 
     consolidated = consolidate_seqs(seqs)
-    qc_results, fasta_pass = filter_seqs(consolidated, args.amb_threshold, args.z_threshold, metadata_map=metadata_map)
+    qc_results, fasta_pass = filter_seqs(consolidated, args.amb_threshold, args.z_threshold, args.min_canonical, metadata_map=metadata_map, plot_file=os.path.join(args.outdir, f"{taxon}-{segment}.len_dist_input.jpg"))
     save_output(qc_results, fasta_pass, taxon, segment, args.outdir)
 
     print(f"Raw Count: {len(seqs)}\nFinal Count: {len(fasta_pass)}")
